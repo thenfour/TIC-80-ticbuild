@@ -1642,11 +1642,11 @@ static void updateMDate(Studio* studio)
 
 static void updateTitle(Studio* studio)
 {
-    char name[TICNAME_MAX] = TIC_TITLE;
+    char name[TICNAME_MAX] = TIC_NAME;
 
 #if defined(BUILD_EDITORS)
     if(strlen(studio->console->rom.name))
-        snprintf(name, TICNAME_MAX, "%s [%s]", TIC_TITLE, studio->console->rom.name);
+        snprintf(name, TICNAME_MAX, "%s [%s]", TIC_NAME, studio->console->rom.name);
 
     if(studio->remoting)
     {
