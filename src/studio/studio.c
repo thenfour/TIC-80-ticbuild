@@ -1644,6 +1644,19 @@ static void updateTitle(Studio* studio)
 #if defined(BUILD_EDITORS)
     if(strlen(studio->console->rom.name))
         snprintf(name, TICNAME_MAX, "%s [%s]", TIC_TITLE, studio->console->rom.name);
+
+    if(studio->remoting)
+    {
+        char extra[256];
+        ticbuild_remoting_get_title_info(studio->remoting, extra, sizeof extra);
+        if(extra[0])
+        {
+            char full[TICNAME_MAX];
+            snprintf(full, TICNAME_MAX, "%s | %s", name, extra);
+            strncpy(name, full, TICNAME_MAX - 1);
+            name[TICNAME_MAX - 1] = '\0';
+        }
+    }
 #endif
 
     tic_sys_title(name);
@@ -2575,7 +2588,11 @@ void studio_tick(Studio* studio, tic80_input input)
 #if defined(BUILD_EDITORS)
     if(studio->remoting)
     {
+        ticbuild_remoting_on_frame(studio->remoting, tic_sys_counter_get(), tic_sys_freq_get());
         ticbuild_remoting_tick(studio->remoting);
+
+        if(ticbuild_remoting_take_title_dirty(studio->remoting))
+            updateTitle(studio);
     }
 
     processAnim(studio->anim.movie, studio);

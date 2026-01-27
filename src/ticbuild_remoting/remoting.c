@@ -20,12 +20,19 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_cal
 void ticbuild_remoting_close(TicbuildRemoting* ctx) { (void)ctx; }
 void ticbuild_remoting_tick(TicbuildRemoting* ctx) { (void)ctx; }
 
+void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq) { (void)ctx; (void)counter; (void)freq; }
+int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx) { (void)ctx; return 0; }
+void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap) { (void)ctx; if(out && outcap) out[0] = '\0'; }
+bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx) { (void)ctx; return false; }
+
 #else
 
 // todo: a x-platform abstraction? sdl?
 # include <winsock2.h>
 # include <ws2tcpip.h>
 # pragma comment(lib, "Ws2_32.lib")
+
+# include "ticbuild_remoting/fps.h"
 typedef SOCKET tb_socket;
 # define TB_INVALID_SOCKET INVALID_SOCKET
 # define tb_close_socket closesocket
@@ -71,6 +78,14 @@ struct TicbuildRemoting
     int port;
     ticbuild_remoting_callbacks cb;
 
+    // FPS tracking (time-window moving average)
+    tb_fps_tracker fps;
+
+    // Title/status tracking
+    bool title_dirty;
+    bool last_client_connected;
+    char last_listen_err[128];
+
     bool wsa_started;
 
     tb_socket listen_sock;
@@ -86,6 +101,62 @@ struct TicbuildRemoting
     uint8_t* tmpbytes;
     size_t tmpbytes_cap;
 };
+
+static void tb_mark_title_dirty(TicbuildRemoting* ctx)
+{
+    if(ctx) ctx->title_dirty = true;
+}
+
+void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq)
+{
+    if(!ctx) return;
+
+    if(tb_fps_on_frame(&ctx->fps, counter, freq))
+        tb_mark_title_dirty(ctx);
+}
+
+int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx)
+{
+    return ctx ? tb_fps_get(&ctx->fps) : 0;
+}
+
+void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap)
+{
+    if(!out || outcap == 0) return;
+    out[0] = '\0';
+    if(!ctx) return;
+
+    const char* listen_state = NULL;
+    char listen_buf[256];
+
+    if(ctx->listen_sock != TB_INVALID_SOCKET)
+    {
+        if(ctx->client_sock != TB_INVALID_SOCKET)
+            snprintf(listen_buf, sizeof listen_buf, "listening on 127.0.0.1:%d (connected)", ctx->port);
+        else
+            snprintf(listen_buf, sizeof listen_buf, "listening on 127.0.0.1:%d", ctx->port);
+        listen_state = listen_buf;
+    }
+    else if(ctx->last_listen_err[0])
+    {
+        snprintf(listen_buf, sizeof listen_buf, "remoting error: %s", ctx->last_listen_err);
+        listen_state = listen_buf;
+    }
+    else
+    {
+        listen_state = "remoting not listening";
+    }
+
+    snprintf(out, outcap, "FPS: %d | %s", tb_fps_get(&ctx->fps), listen_state);
+}
+
+bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx)
+{
+    if(!ctx) return false;
+    bool v = ctx->title_dirty;
+    ctx->title_dirty = false;
+    return v;
+}
 
 static void tb_set_err(char* err, size_t cap, const char* msg)
 {
@@ -539,6 +610,8 @@ static void tb_disconnect_client(TicbuildRemoting* ctx)
         ctx->client_sock = TB_INVALID_SOCKET;
     }
 
+    tb_mark_title_dirty(ctx);
+
     ctx->inlen = 0;
     ctx->outlen = 0;
     ctx->outpos = 0;
@@ -561,6 +634,7 @@ static void tb_accept_client(TicbuildRemoting* ctx)
 
     (void)tb_set_nonblocking(c);
     ctx->client_sock = c;
+    tb_mark_title_dirty(ctx);
 }
 
 static bool tb_read_client(TicbuildRemoting* ctx)
@@ -942,6 +1016,22 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         return;
     }
 
+    if(strcmp(cmd, "getfps") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(ctx, id, false, "usage: <id> getfps");
+            return;
+        }
+
+        char data[32];
+        snprintf(data, sizeof data, "%d", ticbuild_remoting_get_fps(ctx));
+        tb_free_args(args, argc);
+        tb_send_response_str(ctx, id, true, data);
+        return;
+    }
+
     tb_free_args(args, argc);
     tb_send_response_str(ctx, id, false, "unknown command");
 }
@@ -986,6 +1076,8 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_cal
     ctx->port = port;
     if(callbacks) ctx->cb = *callbacks;
 
+    tb_fps_init(&ctx->fps);
+
     ctx->listen_sock = TB_INVALID_SOCKET;
     ctx->client_sock = TB_INVALID_SOCKET;
 
@@ -1026,7 +1118,18 @@ void ticbuild_remoting_tick(TicbuildRemoting* ctx)
 
     char err[128];
     if(!tb_socket_init(ctx, err, sizeof err))
+    {
+        tb_set_err(ctx->last_listen_err, sizeof ctx->last_listen_err, err[0] ? err : "socket init failed");
+        tb_mark_title_dirty(ctx);
         return;
+    }
+
+    // Clear previous error once we're healthy.
+    if(ctx->last_listen_err[0])
+    {
+        ctx->last_listen_err[0] = '\0';
+        tb_mark_title_dirty(ctx);
+    }
 
     tb_accept_client(ctx);
 
@@ -1037,6 +1140,14 @@ void ticbuild_remoting_tick(TicbuildRemoting* ctx)
         tb_read_client(ctx);
         tb_process_input(ctx);
         tb_flush_output(ctx);
+    }
+
+    // Track connect/disconnect changes that happened during the tick.
+    bool connected = (ctx->client_sock != TB_INVALID_SOCKET);
+    if(connected != ctx->last_client_connected)
+    {
+        ctx->last_client_connected = connected;
+        tb_mark_title_dirty(ctx);
     }
 }
 

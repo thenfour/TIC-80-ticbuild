@@ -1,3 +1,8 @@
+# Features in this fork
+
+- Remoting server
+- Frame timing and remoting display in window title
+
 # remoting support for ticbuild
 
 [ticbuild](https://github.com/thenfour/ticbuild) is a build system for TIC-80 which
@@ -48,6 +53,7 @@ binds to `127.0.0.1`. Single connection supported for simplicity.
     - `eval <code>` - no return possible (`tic_script.eval` has `void` return type).
       you could just make the script do something visible, like `poke()`.
       - TODO: enable trace output to remote? or support return data?
+    - `getfps` - gets current FPS
   - datatypes
     - numbers
       - Only integers for the moment. No fancy `1e3` forms, just:
@@ -59,7 +65,6 @@ binds to `127.0.0.1`. Single connection supported for simplicity.
       - example: `<ff 22 00>`
       - string syntax: always hexadecimal.
       - whitespace is ignored so `<ff2200>` or `<f f220 0>` are equivalent to `<ff 22 00>`
-
 - response
   - datatypes follow same convention as requests
   - `<id> <status> <data...>`
@@ -70,6 +75,11 @@ binds to `127.0.0.1`. Single connection supported for simplicity.
       - `1 ping` => `1 OK PONG`
       - `44 sync 24` => `44 OK`
       - `xx` => `0 ERR "error description here"`
+  - (not currently needed; theoretical) events: `@ <eventtype> <data...>`
+    - server can send event messages to the client using similar format, but the
+      message id is `@`. Datatype semantics remain. Examples:
+      - `@ trace "hello from tic80"`
+      - (this is the only one supported so far)
 - Commands to be queued and executed at a deterministic safe point in the
   TIC-80 system loop (e.g., between frames if the cart is running)
 

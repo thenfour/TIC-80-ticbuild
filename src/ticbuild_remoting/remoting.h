@@ -32,6 +32,20 @@ void ticbuild_remoting_close(TicbuildRemoting* ctx);
 
 void ticbuild_remoting_tick(TicbuildRemoting* ctx);
 
+// Per-frame timing hook (call once per rendered frame).
+// `counter`/`freq` should come from tic_sys_counter_get()/tic_sys_freq_get().
+void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq);
+
+// Current FPS (or 0)
+int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx);
+
+// Builds a short status string suitable for the window title, e.g.
+// `FPS: 60 | listening on 127.0.0.1:9977`.
+void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap);
+
+// Returns whether the title should be refreshed (and clears the internal dirty flag).
+bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx);
+
 #ifdef __cplusplus
 }
 #endif
