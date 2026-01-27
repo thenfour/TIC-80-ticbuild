@@ -41,6 +41,7 @@
 #include "ext/history.h"
 #include "net.h"
 #include "ticbuild_remoting/remoting.h"
+#include "ticbuild_remoting/user_timing.h"
 #include "wave_writer.h"
 #include "ext/gif.h"
 #define MSF_GIF_IMPL
@@ -58,6 +59,8 @@
 #include "screens/run.h"
 #include "screens/menu.h"
 #include "screens/mainmenu.h"
+
+#include "api.h"
 
 #include "fs.h"
 
@@ -2588,11 +2591,7 @@ void studio_tick(Studio* studio, tic80_input input)
 #if defined(BUILD_EDITORS)
     if(studio->remoting)
     {
-        ticbuild_remoting_on_frame(studio->remoting, tic_sys_counter_get(), tic_sys_freq_get());
         ticbuild_remoting_tick(studio->remoting);
-
-        if(ticbuild_remoting_take_title_dirty(studio->remoting))
-            updateTitle(studio);
     }
 
     processAnim(studio->anim.movie, studio);
@@ -2636,6 +2635,28 @@ void studio_tick(Studio* studio, tic80_input input)
         callback[studio->mode].data
             ? tic_core_blit_ex(tic, callback[studio->mode])
             : tic_core_blit(tic);
+
+#if defined(BUILD_EDITORS)
+        if(studio->remoting)
+        {
+            uint32_t tic_ms10 = 0, scn_ms10 = 0, bdr_ms10 = 0, tot_ms10 = 0;
+
+            // Finalize timing for the frame that was just rendered.
+            // Only meaningful in RUN mode; otherwise avoid showing stale values.
+            if(studio->mode == TIC_RUN_MODE)
+            {
+                ticbuild_user_timing_end_frame(tic);
+                ticbuild_user_timing_get_last_ms10(tic, &tic_ms10, &scn_ms10, &bdr_ms10, &tot_ms10);
+            }
+
+            ticbuild_remoting_set_user_time_ms10(studio->remoting, tic_ms10, scn_ms10, bdr_ms10, tot_ms10);
+            ticbuild_remoting_on_frame(studio->remoting, tic_sys_counter_get(), tic_sys_freq_get());
+
+            if(ticbuild_remoting_take_title_dirty(studio->remoting)) {
+                updateTitle(studio);
+            }
+        }
+#endif
 
         blitCursor(studio);
 

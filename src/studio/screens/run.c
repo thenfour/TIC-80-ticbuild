@@ -26,6 +26,10 @@
 #include "ext/md5.h"
 #include <time.h>
 
+#if defined(BUILD_EDITORS)
+#include "ticbuild_remoting/user_timing.h"
+#endif
+
 static void onTrace(void* data, const char* text, u8 color)
 {
 #if defined(BUILD_EDITORS)
@@ -103,7 +107,18 @@ static void tick(Run* run)
 
     tic_mem* tic = run->tic;
 
+// #if defined(BUILD_EDITORS)
+//     // install our hooks.
+//     // Calling this before/after handles the "first tick initializes the VM" case.
+//     // in other 
+//     ticbuild_user_timing_install(tic);
+// #endif
+
     tic_core_tick(tic, &run->tickData);
+
+#if defined(BUILD_EDITORS)
+    ticbuild_user_timing_install(tic);
+#endif
 
     enum {Size = sizeof(tic_persistent)};
 

@@ -22,6 +22,10 @@ void ticbuild_remoting_tick(TicbuildRemoting* ctx) { (void)ctx; }
 
 void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq) { (void)ctx; (void)counter; (void)freq; }
 int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx) { (void)ctx; return 0; }
+void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms10, uint32_t scn_ms10, uint32_t bdr_ms10, uint32_t total_ms10)
+{
+    (void)ctx; (void)tic_ms10; (void)scn_ms10; (void)bdr_ms10; (void)total_ms10;
+}
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap) { (void)ctx; if(out && outcap) out[0] = '\0'; }
 bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx) { (void)ctx; return false; }
 
@@ -86,6 +90,12 @@ struct TicbuildRemoting
     bool last_client_connected;
     char last_listen_err[128];
 
+    // Per-frame user callback timing (0.1ms fixed units)
+    uint32_t user_tic_ms10;
+    uint32_t user_scn_ms10;
+    uint32_t user_bdr_ms10;
+    uint32_t user_total_ms10;
+
     bool wsa_started;
 
     tb_socket listen_sock;
@@ -107,6 +117,12 @@ static void tb_mark_title_dirty(TicbuildRemoting* ctx)
     if(ctx) ctx->title_dirty = true;
 }
 
+static void tb_format_ms10(char* out, size_t cap, uint32_t ms10)
+{
+    if(!out || cap == 0) return;
+    snprintf(out, cap, "%u.%ums", (unsigned)(ms10 / 10), (unsigned)(ms10 % 10));
+}
+
 void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq)
 {
     if(!ctx) return;
@@ -118,6 +134,23 @@ void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_
 int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx)
 {
     return ctx ? tb_fps_get(&ctx->fps) : 0;
+}
+
+void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms10, uint32_t scn_ms10, uint32_t bdr_ms10, uint32_t total_ms10)
+{
+    if(!ctx) return;
+
+    if(ctx->user_tic_ms10 != tic_ms10 ||
+       ctx->user_scn_ms10 != scn_ms10 ||
+       ctx->user_bdr_ms10 != bdr_ms10 ||
+       ctx->user_total_ms10 != total_ms10)
+    {
+        ctx->user_tic_ms10 = tic_ms10;
+        ctx->user_scn_ms10 = scn_ms10;
+        ctx->user_bdr_ms10 = bdr_ms10;
+        ctx->user_total_ms10 = total_ms10;
+        tb_mark_title_dirty(ctx);
+    }
 }
 
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap)
@@ -147,7 +180,17 @@ void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, si
         listen_state = "remoting not listening";
     }
 
-    snprintf(out, outcap, "FPS: %d | %s", tb_fps_get(&ctx->fps), listen_state);
+    char ticbuf[32], scnbuf[32], bdrbuf[32], totbuf[32];
+    tb_format_ms10(ticbuf, sizeof ticbuf, ctx->user_tic_ms10);
+    tb_format_ms10(scnbuf, sizeof scnbuf, ctx->user_scn_ms10);
+    tb_format_ms10(bdrbuf, sizeof bdrbuf, ctx->user_bdr_ms10);
+    tb_format_ms10(totbuf, sizeof totbuf, ctx->user_total_ms10);
+
+    snprintf(out, outcap,
+        "FPS: %d | TIC %s SCN %s BDR %s TOT %s | %s",
+        tb_fps_get(&ctx->fps),
+        ticbuf, scnbuf, bdrbuf, totbuf,
+        listen_state);
 }
 
 bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx)

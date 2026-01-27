@@ -39,6 +39,9 @@ void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_
 // Current FPS (or 0)
 int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx);
 
+// per-frame time spent in user callbacks, in 0.1ms units.
+void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms10, uint32_t scn_ms10, uint32_t bdr_ms10, uint32_t total_ms10);
+
 // Builds a short status string suitable for the window title, e.g.
 // `FPS: 60 | listening on 127.0.0.1:9977`.
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap);
