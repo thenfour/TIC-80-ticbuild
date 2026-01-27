@@ -1,3 +1,13 @@
+# ticbuild fork
+
+**this is a fork**, for the sake of supporting the [ticbuild](https://github.com/thenfour/ticbuild) build system.
+
+Changes here are put in branch `ticbuild-remoting`.
+
+See the full [README](./src/ticbuild_remoting/README.md) for this fork.
+
+# original readme:
+
 [![Build Status](https://github.com/nesbox/TIC-80/workflows/Build/badge.svg)](https://github.com/nesbox/TIC-80/actions?query=workflow%3ABuild)
 
 ![TIC-80](https://tic80.com/img/logo64.png)
@@ -41,6 +51,7 @@
   - [Credits](#credits)
 
 # About
+
 TIC-80 is a free and open source fantasy computer for making, playing and sharing tiny games.
 
 With TIC-80 you get built-in tools for development: code, sprites, maps, sound editors and the command line, which is enough to create a mini retro game.
@@ -52,6 +63,7 @@ To make a retro styled game, the whole process of creation and execution takes p
 ![TIC-80](https://user-images.githubusercontent.com/1101448/92492270-d6bcbc80-f1fb-11ea-9d2d-468ad015ace2.gif)
 
 ### Features
+
 - Multiple programming languages: [Lua](https://www.lua.org),
   [Moonscript](https://moonscript.org),
   [Javascript](https://developer.mozilla.org/en-US/docs/Web/JavaScript),
@@ -70,15 +82,19 @@ To make a retro styled game, the whole process of creation and execution takes p
 # Binary Downloads
 
 ## Stable Builds
+
 You can download compiled versions for the major operating systems directly from our [Releases](https://github.com/nesbox/TIC-80/releases) page.
 
 ## Nightly Builds
+
 Can be downloaded from official [nightly.link](https://nightly.link/nesbox/TIC-80/workflows/build/main) page or from the [Github Actions](https://github.com/nesbox/TIC-80/actions?query=branch%3Amain) page.
 
 ## Unofficial Builds
+
 Linux (arm64) builds can be downloaded from _aliceisjustplaying_ [nightly.link](https://nightly.link/aliceisjustplaying/TIC-80/workflows/build-linux-arm64/main?preview) page. Tested on Raspberry Pi OS (64-bit) (Bookworm), Asahi Linux (Fedora Remix), Ubuntu 22.04 and Fedora 40.
 
 # Pro Version
+
 To help support TIC-80 development, we have a [PRO Version](https://nesbox.itch.io/tic80).
 
 This version has a few additional features and binaries can only be downloaded on our itch.io page.
@@ -86,16 +102,19 @@ This version has a few additional features and binaries can only be downloaded o
 For users who can't afford the program can easily build the pro version from the source code using `cmake .. -DBUILD_PRO=On` command.
 
 ## Pro Features
+
 - Save/load cartridges in text format, and create your game in any editor you want, also useful for version control systems.
 - Even more memory banks: instead of having only 1 memory bank you have 8.
 - Export your game without editors, and then publish it to app stores.
 
 # Community
+
 You can play and share games, tools and music at [tic80.com/play](https://tic80.com/play).
 
 The community also hangs out and discusses on [Telegram](https://t.me/tic80) or [Discord](https://discord.gg/HwZDw7n4dN).
 
 # Contributing
+
 You can contribute by reporting a bug or requesting a new feature on our [Issues](https://github.com/nesbox/TIC-80/issues) page.
 Keep in mind when engaging on a discussion to follow our [Code of Conduct](https://github.com/nesbox/TIC-80/blob/main/CODE_OF_CONDUCT.md).
 
@@ -109,6 +128,7 @@ The wiki holds TIC-80 documentation, code snippets and game development tutorial
 ### MSVC (Microsoft Visual C++)
 
 #### Windows XP / Windows 7 32-bit (x86)
+
 The build process has been tested on Windows 11 64-bit (x64); all this should run on Windows 7 SP1 32-bit (x86) as well. This guide assumes you're running an elevated Command Prompt.
 
 - Install [Git](https://git-scm.com/download/win), [CMake](https://cmake.org/download), [Visual Studio 2019 Build Tools](https://winstall.app/apps/Microsoft.VisualStudio.2019.BuildTools) and [Ruby+Devkit 2.7.8 x86](https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-2.7.8-1/rubyinstaller-devkit-2.7.8-1-x86.exe)
@@ -137,12 +157,15 @@ cmake --build . --parallel
 You'll find `tic80.exe` in `TIC-80\build\bin`.
 
 #### Windows 10 / 11 64-bit (x64)
+
 This guide assumes you're running PowerShell with an elevated prompt.
 
 - Install [Git](https://git-scm.com/download/win), [CMake](https://cmake.org/download), [Visual Studio 2019 Build Tools](https://winstall.app/apps/Microsoft.VisualStudio.2019.BuildTools) and [Ruby+Devkit 2.7.8 x64](https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-2.7.8-1/rubyinstaller-devkit-2.7.8-1-x64.exe) manually or with [WinGet](https://github.com/microsoft/winget-cli):
+
 ```
 winget install Git.Git Kitware.CMake Microsoft.VisualStudio.2019.BuildTools RubyInstallerTeam.RubyWithDevKit.2.7
 ```
+
 - Install the neccessary dependencies within VS2019:
   - Launch "Visual Studio Installer"
   - Click "Modify"
@@ -171,12 +194,15 @@ You'll find `tic80.exe` in `TIC-80\build\bin`.
 ### MSYS2 / MINGW
 
 #### Windows 10 / 11 64-bit (x64)
+
 This guide assumes you're running PowerShell with an elevated prompt.
 
 - Install [Git](https://git-scm.com/download/win), [CMake](https://cmake.org/download) and [Ruby+Devkit 2.7.8 x64](https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-2.7.8-1/rubyinstaller-devkit-2.7.8-1-x64.exe) manually or with [WinGet](https://github.com/microsoft/winget-cli):
+
 ```
 winget install Git.Git Kitware.CMake RubyInstallerTeam.RubyWithDevKit.2.7
 ```
+
 - Run `ridk install` with options `1,3` to set up [MSYS2](https://www.msys2.org) and development toolchain
 - Add MSYS2's [`gcc`](https://gcc.gnu.org) at `C:\Ruby27-x64\msys64\mingw64\bin` to your `$PATH` [manually](https://www.java.com/en/download/help/path.html#:~:text=Mac%20OS%20X.-,Windows,-Windows%2010%20and) or with the following PowerShell command:
 
@@ -200,6 +226,7 @@ You'll find `tic80.exe` in `TIC-80\build\bin`.
 ### Ubuntu
 
 #### Ubuntu 22.04 (Jammy Jellyfish)
+
 Run the following commands from a terminal:
 
 ```
@@ -220,6 +247,7 @@ cmake -DBUILD_SDLGPU=On -DBUILD_WITH_ALL=On .. && cmake --build . --parallel
 Install with [Install Instructions](#install-instructions)
 
 #### Ubuntu 24.04 (Noble Numbat)
+
 Run the following commands from a terminal:
 
 ```
@@ -231,7 +259,9 @@ cmake -DBUILD_SDLGPU=On -DBUILD_WITH_ALL=On -DBUILD_STATIC=On .. && cmake --buil
 Install with [Install Instructions](#install-instructions)
 
 ### Arch
+
 run the following commands in the Terminal
+
 ```
 sudo pacman -S cmake ruby mesa libglvnd glu
 git clone --recursive https://github.com/nesbox/TIC-80 && cd TIC-80/build
@@ -243,7 +273,9 @@ Install with [Install Instructions](#install-instructions)
 ### Fedora
 
 #### Fedora 36
+
 run the following commands in the Terminal
+
 ```
 sudo dnf -y groupinstall "Development Tools" "Development Libraries"
 sudo dnf -y install ruby rubygem-{tk{,-doc},rake,test-unit} cmake libglvnd-devel libglvnd-gles freeglut-devel clang libXext-devel SDL_sound pipewire-devel pipewire-jack-audio-connection-kit-devel pulseaudio-libs-devel
@@ -254,7 +286,9 @@ cmake -DCMAKE_CXX_COMPILER=clang++ -DSDL_ALSA=On -DBUILD_WITH_ALL=On ..
 Install with [Install Instructions](#install-instructions)
 
 #### Fedora 40
+
 Run the following commands from a terminal:
+
 ```
 sudo dnf -y groupinstall "Development Tools" "Development Libraries"
 sudo dnf -y install ruby-devel rubygem-rake cmake clang pipewire-devel SDL2-devel SDL2_sound-devel SDL2_gfx-devel wayland-devel libXext-devel pipewire-jack-audio-connection-kit-devel pipewire-jack-audio-connection-kit-devel pulseaudio-libs-devel rubygems-devel libdecor-devel libdrm-devel mesa-libgbm-devel esound-devel freeglut-devel
@@ -267,7 +301,9 @@ Install with [Install Instructions](#install-instructions)
 ### openSUSE
 
 #### openSUSE Tumbleweed / Leap 16.0
+
 Run the following commands from a terminal:
+
 ```
 sudo zypper refresh
 sudo zypper install --no-confirm --type pattern devel_basis
@@ -281,6 +317,7 @@ Install with [Install Instructions](#install-instructions)
 ### Raspberry Pi
 
 #### Raspberry Pi OS (64-Bit) (Bookworm)
+
 Run the following commands from a terminal:
 
 ```
@@ -292,6 +329,7 @@ cmake -DBUILD_SDLGPU=On -DBUILD_WITH_ALL=On .. && cmake --build . --parallel 2
 Install with [Install Instructions](#install-instructions)
 
 #### Raspberry Pi (Retropie)
+
 First, add jessie-backports repo to your `/etc/apt/sources.list`
 
 `deb [check-valid-until=no] http://archive.debian.org/debian jessie-backports main`
@@ -331,9 +369,11 @@ for "Advanced Options", followed by 6 for "GL Drivers", and enable "GL
 (Fake KMS) Desktop Driver". After changing this setting, reboot.
 
 ## Mac
+
 install `Command Line Tools for Xcode` and `brew` package manager
 
 run the following commands in the Terminal
+
 ```
 brew install git cmake
 git clone --recursive https://github.com/nesbox/TIC-80 && cd TIC-80/build
@@ -342,6 +382,7 @@ make -j4
 ```
 
 to create application icon for development version
+
 ```
 mkdir -p ~/Applications/tic80dev.app/Contents/{MacOS,Resources}
 cp -f macosx/tic80.plist ~/Applications/tic80dev.app/Contents/Info.plist
@@ -352,11 +393,14 @@ exec /Users/nesbox/projects/TIC-80/build/bin/tic80 --skip >/dev/null
 EOF
 chmod +x ~/Applications/tic80dev.app/Contents/MacOS/tic80
 ```
+
 Make sure to update the absolute path to the tic80 binary in the script, or
 update the launch arguments.
 
 ## FreeBSD
+
 run the following commands in the Terminal
+
 ```
 sudo pkg install gcc git cmake ruby libglvnd libglu freeglut mesa-devel mesa-dri alsa-lib
 git clone --recursive https://github.com/nesbox/TIC-80 && cd TIC-80/build
@@ -373,6 +417,7 @@ sudo ln -s /usr/local/lib/dri/swrast_dri.so /usr/local/lib/dri-devel/
 # Install instructions
 
 ## Linux
+
 - To make an executable file `./tic80` without installation run `make` and locate the output in `TIC-80/build/bin`.
 - To install system-wide run `sudo make install`
 - You can append `-j4` if you have a modern system, or `-j2` for a Raspberry Pi to speed up the process.
@@ -380,48 +425,52 @@ sudo ln -s /usr/local/lib/dri/swrast_dri.so /usr/local/lib/dri-devel/
 TIC-80 can now be run with `tic80` (if installed) or `./tic80` (with no installation).
 
 ## iOS / tvOS
+
 You can find iOS/tvOS version here
+
 - 0.60.3: https://github.com/brunophilipe/TIC-80
 - 0.45.0: https://github.com/CliffsDover/TIC-80
 
 ## Android
+
 You can find the compiled version ready download and install [on F-Droid](https://f-droid.org/packages/com.nesbox.tic/):  
 [<img alt="Get it on F-Droid" src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" width="256">](https://f-droid.org/packages/com.nesbox.tic/)
 
 ## Credits
-* Filippo Rivato — [Twitter @HomineLudens](https://twitter.com/HomineLudens)
-* Fred Bednarski — [Twitter @FredBednarski](https://twitter.com/FredBednarski)
-* Al Rado — [Twitter @alrado2](https://twitter.com/alrado2)
-* Trevor Martin — [Twitter @trelemar](https://twitter.com/trelemar)
-* MonstersGoBoom — [Twitter @MonstersGoBoom](https://twitter.com/MonstersGo)
-* Matheus Lessa — [Twitter @matheuslrod](https://twitter.com/matheuslrod)
-* CliffsDover — [Twitter @DancingBottle](https://twitter.com/DancingBottle)
-* Frantisek Jahoda — [GitHub @jahodfra](https://github.com/jahodfra)
-* Guilherme Medeiros — [GitHub @frenetic](https://github.com/frenetic)
-* Andrei Rudenko — [GitHub @RudenkoArts](https://github.com/RudenkoArts)
-* Phil Hagelberg — [@technomancy](https://technomancy.us/colophon)
-* Rob Loach — [Twitter @RobLoach](https://twitter.com/RobLoach) [GitHub @RobLoach](https://github.com/RobLoach)
-* Wade Brainerd — [GitHub @wadetb](https://github.com/wadetb)
-* Paul Robinson — [GitHub @paul59](https://github.com/paul59)
-* Stefan Devai — [GitHub @stefandevai](https://github.com/stefandevai) [Blog stefandevai.me](https://stefandevai.me)
-* Damien de Lemeny — [GitHub @ddelemeny](https://github.com/ddelemeny)
-* Adrian Siekierka — [GitHub @asiekierka](https://github.com/asiekierka) [Website](https://asie.pl/)
-* Jay Em (Sweetie16 palette) — [Twitter @GrafxKid](https://twitter.com/GrafxKid)
-* msx80 — [Twitter @msx80](https://twitter.com/msx80) [Github msx80](https://github.com/msx80)
-* Josh Goebel — [Twitter @dreamer3](https://twitter.com/dreamer3) [Github joshgoebel](https://github.com/joshgoebel)
-* Joshua Minor — [GitHub @jminor](https://github.com/jminor)
-* Julia Nelz — [Github @remi6397](https://github.com/remi6397) [WWW](https://nelz.pl)
-* Thorben Krüger — [Mastodon @benthor@chaos.social](https://chaos.social/@benthor)
-* David St—Hilaire — [GitHub @sthilaid](https://github.com/sthilaid)
-* Alec Troemel — [Github @alectroemel](https://github.com/AlecTroemel)
-* Kolten Pearson — [Github @koltenpearson](https://github.com/koltenpearson)
-* Cort Stratton — [Github @cdwfs](https://github.com/cdwfs)
-* Alice — [Github @aliceisjustplaying](https://github.com/aliceisjustplaying)
-* Sven Knebel — [Github @sknebel](https://github.com/sknebel)
-* Graham Bates — [Github @grahambates](https://github.com/grahambates)
-* Kii — [Github @kiikrindar](https://github.com/kiikrindar)
-* Matt Westcott — [Github @gasman](https://github.com/gasman)
-* NuSan — [Github @TheNuSan](https://github.com/thenusan)
-* Li Jin — [Github @pigpigyyy](https://github.com/pigpigyyy)
-* Dania Rifki — [Github @Kaleidosium](https://github.com/Kaleidosium)
-* Carsten Teibes — [GitHub @carstene1ns](https://github.com/carstene1ns)
+
+- Filippo Rivato — [Twitter @HomineLudens](https://twitter.com/HomineLudens)
+- Fred Bednarski — [Twitter @FredBednarski](https://twitter.com/FredBednarski)
+- Al Rado — [Twitter @alrado2](https://twitter.com/alrado2)
+- Trevor Martin — [Twitter @trelemar](https://twitter.com/trelemar)
+- MonstersGoBoom — [Twitter @MonstersGoBoom](https://twitter.com/MonstersGo)
+- Matheus Lessa — [Twitter @matheuslrod](https://twitter.com/matheuslrod)
+- CliffsDover — [Twitter @DancingBottle](https://twitter.com/DancingBottle)
+- Frantisek Jahoda — [GitHub @jahodfra](https://github.com/jahodfra)
+- Guilherme Medeiros — [GitHub @frenetic](https://github.com/frenetic)
+- Andrei Rudenko — [GitHub @RudenkoArts](https://github.com/RudenkoArts)
+- Phil Hagelberg — [@technomancy](https://technomancy.us/colophon)
+- Rob Loach — [Twitter @RobLoach](https://twitter.com/RobLoach) [GitHub @RobLoach](https://github.com/RobLoach)
+- Wade Brainerd — [GitHub @wadetb](https://github.com/wadetb)
+- Paul Robinson — [GitHub @paul59](https://github.com/paul59)
+- Stefan Devai — [GitHub @stefandevai](https://github.com/stefandevai) [Blog stefandevai.me](https://stefandevai.me)
+- Damien de Lemeny — [GitHub @ddelemeny](https://github.com/ddelemeny)
+- Adrian Siekierka — [GitHub @asiekierka](https://github.com/asiekierka) [Website](https://asie.pl/)
+- Jay Em (Sweetie16 palette) — [Twitter @GrafxKid](https://twitter.com/GrafxKid)
+- msx80 — [Twitter @msx80](https://twitter.com/msx80) [Github msx80](https://github.com/msx80)
+- Josh Goebel — [Twitter @dreamer3](https://twitter.com/dreamer3) [Github joshgoebel](https://github.com/joshgoebel)
+- Joshua Minor — [GitHub @jminor](https://github.com/jminor)
+- Julia Nelz — [Github @remi6397](https://github.com/remi6397) [WWW](https://nelz.pl)
+- Thorben Krüger — [Mastodon @benthor@chaos.social](https://chaos.social/@benthor)
+- David St—Hilaire — [GitHub @sthilaid](https://github.com/sthilaid)
+- Alec Troemel — [Github @alectroemel](https://github.com/AlecTroemel)
+- Kolten Pearson — [Github @koltenpearson](https://github.com/koltenpearson)
+- Cort Stratton — [Github @cdwfs](https://github.com/cdwfs)
+- Alice — [Github @aliceisjustplaying](https://github.com/aliceisjustplaying)
+- Sven Knebel — [Github @sknebel](https://github.com/sknebel)
+- Graham Bates — [Github @grahambates](https://github.com/grahambates)
+- Kii — [Github @kiikrindar](https://github.com/kiikrindar)
+- Matt Westcott — [Github @gasman](https://github.com/gasman)
+- NuSan — [Github @TheNuSan](https://github.com/thenusan)
+- Li Jin — [Github @pigpigyyy](https://github.com/pigpigyyy)
+- Dania Rifki — [Github @Kaleidosium](https://github.com/Kaleidosium)
+- Carsten Teibes — [GitHub @carstene1ns](https://github.com/carstene1ns)
