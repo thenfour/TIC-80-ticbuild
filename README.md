@@ -4,7 +4,7 @@
 
 Changes here are put in branch `ticbuild-remoting`.
 
-See the full [README](./src/ticbuild_remoting/README.md) for this fork.
+See the full [README](https://github.com/thenfour/TIC-80-ticbuild/tree/ticbuild-remoting?tab=readme-ov-file) for this fork.
 
 # original readme:
 
