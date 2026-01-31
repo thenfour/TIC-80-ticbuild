@@ -48,6 +48,7 @@ enum { TB_INBUF_LIMIT = 1024 * 1024 /* 1 MB */ };
 enum { TB_OUTBUF_LIMIT = 1024 * 1024 };
 enum { TB_LINE_LIMIT = 1024 * 1024 };
 enum { TB_PEEK_LIMIT = 1024 * 1024 };
+enum { TB_MAX_CLIENTS = 10 };
 
 typedef struct
 {
@@ -77,6 +78,18 @@ typedef struct
     } v;
 } tb_arg;
 
+typedef struct
+{
+    tb_socket sock;
+
+    char* inbuf;
+    size_t inlen;
+
+    char* outbuf;
+    size_t outlen;
+    size_t outpos;
+} tb_client;
+
 struct TicbuildRemoting
 {
     int port;
@@ -87,7 +100,7 @@ struct TicbuildRemoting
 
     // Title/status tracking
     bool title_dirty;
-    bool last_client_connected;
+    int last_client_count;
     char last_listen_err[128];
 
     // Per-frame user callback timing (0.1ms fixed units)
@@ -99,14 +112,9 @@ struct TicbuildRemoting
     bool wsa_started;
 
     tb_socket listen_sock;
-    tb_socket client_sock;
 
-    char* inbuf;
-    size_t inlen;
-
-    char* outbuf;
-    size_t outlen;
-    size_t outpos;
+    tb_client clients[TB_MAX_CLIENTS];
+    int client_count;
 
     uint8_t* tmpbytes;
     size_t tmpbytes_cap;
@@ -164,10 +172,7 @@ void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, si
 
     if(ctx->listen_sock != TB_INVALID_SOCKET)
     {
-        if(ctx->client_sock != TB_INVALID_SOCKET)
-            snprintf(listen_buf, sizeof listen_buf, "listening on 127.0.0.1:%d (connected)", ctx->port);
-        else
-            snprintf(listen_buf, sizeof listen_buf, "listening on 127.0.0.1:%d", ctx->port);
+        snprintf(listen_buf, sizeof listen_buf, "listening on 127.0.0.1:%d (%d clients)", ctx->port, ctx->client_count);
         listen_state = listen_buf;
     }
     else if(ctx->last_listen_err[0])
@@ -535,81 +540,52 @@ static size_t tb_escape_string_len(const char* s, size_t n)
     return j;
 }
 
-static void tb_queue_output(TicbuildRemoting* ctx, const char* s, size_t n)
+static void tb_queue_output(tb_client* client, const char* s, size_t n)
 {
     if(n == 0) return;
 
-    if(ctx->outlen + n > TB_OUTBUF_LIMIT)
+    if(client->outlen + n > TB_OUTBUF_LIMIT)
     {
         // Drop output if client can't keep up.
         return;
     }
 
-    char* nb = (char*)realloc(ctx->outbuf, ctx->outlen + n);
+    char* nb = (char*)realloc(client->outbuf, client->outlen + n);
     if(!nb) return;
 
-    memcpy(nb + ctx->outlen, s, n);
-    ctx->outbuf = nb;
-    ctx->outlen += n;
+    memcpy(nb + client->outlen, s, n);
+    client->outbuf = nb;
+    client->outlen += n;
 }
 
-static void tb_send_response_str(TicbuildRemoting* ctx, int64_t id, bool ok, const char* data)
+static void tb_send_response_str(tb_client* client, int64_t id, bool ok, const char* data)
 {
+    char line[2048];
     if(ok)
     {
-        const char* payload = (data && data[0]) ? data : NULL;
-        size_t cap = (size_t)snprintf(NULL, 0, "%lld OK%s%s\n", (long long)id, payload ? " " : "", payload ? payload : "") + 1;
-        char* line = (char*)malloc(cap);
-        if(!line)
-        {
-            char fallback[64];
-            snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
-            tb_queue_output(ctx, fallback, strlen(fallback));
-            return;
-        }
-        snprintf(line, cap, "%lld OK%s%s\n", (long long)id, payload ? " " : "", payload ? payload : "");
-        tb_queue_output(ctx, line, strlen(line));
-        free(line);
+        if(data && data[0])
+            snprintf(line, sizeof line, "%lld OK %s\n", (long long)id, data);
+        else
+            snprintf(line, sizeof line, "%lld OK\n", (long long)id);
     }
     else
     {
-        const char* msg = data ? data : "error";
-        size_t mlen = strlen(msg);
-        size_t elen = tb_escape_string_len(msg, mlen);
-        char* esc = (char*)malloc(elen + 1);
-        if(!esc)
-        {
-            char fallback[64];
-            snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
-            tb_queue_output(ctx, fallback, strlen(fallback));
-            return;
-        }
-        tb_escape_string(msg, mlen, esc, elen + 1);
-
-        size_t cap = (size_t)snprintf(NULL, 0, "%lld ERR \"%s\"\n", (long long)id, esc) + 1;
-        char* line = (char*)malloc(cap);
-        if(!line)
-        {
-            char fallback[64];
-            snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
-            tb_queue_output(ctx, fallback, strlen(fallback));
-            free(esc);
-            return;
-        }
-        snprintf(line, cap, "%lld ERR \"%s\"\n", (long long)id, esc);
-        tb_queue_output(ctx, line, strlen(line));
-        free(esc);
-        free(line);
+        char esc[1500];
+        size_t elen = tb_escape_string(data ? data : "error", strlen(data ? data : "error"), esc, sizeof esc);
+        (void)elen;
+        snprintf(line, sizeof line, "%lld ERR \"%s\"\n", (long long)id, esc);
     }
+
+    tb_queue_output(client, line, strlen(line));
 }
 
-static void tb_send_response_bytes(TicbuildRemoting* ctx, int64_t id, const uint8_t* bytes, size_t n)
+static void tb_send_response_bytes(tb_client* client, int64_t id, const uint8_t* bytes, size_t n)
 {
     // Format: <id> OK <aa bb cc>
     // Worst-case size: 1 token per byte + spaces.
     size_t cap = 64 + n * 3 + 4;
     char* line = (char*)malloc(cap);
-    if(!line) { tb_send_response_str(ctx, id, false, "out of memory"); return; }
+    if(!line) { tb_send_response_str(client, id, false, "out of memory"); return; }
 
     size_t pos = 0;
     pos += (size_t)snprintf(line + pos, cap - pos, "%lld OK <", (long long)id);
@@ -622,9 +598,10 @@ static void tb_send_response_bytes(TicbuildRemoting* ctx, int64_t id, const uint
 
     pos += (size_t)snprintf(line + pos, cap - pos, ">\n");
 
-    tb_queue_output(ctx, line, pos);
+    tb_queue_output(client, line, pos);
     free(line);
 }
+
 
 static bool tb_set_nonblocking(tb_socket s)
 {
@@ -680,7 +657,7 @@ static bool tb_socket_init(TicbuildRemoting* ctx, char* err, size_t errcap)
         return false;
     }
 
-    if(listen(s, 1) != 0)
+    if(listen(s, TB_MAX_CLIENTS) != 0)
     {
         tb_close_socket(s);
         tb_set_err(err, errcap, "listen() failed");
@@ -691,125 +668,160 @@ static bool tb_socket_init(TicbuildRemoting* ctx, char* err, size_t errcap)
     return true;
 }
 
-static void tb_disconnect_client(TicbuildRemoting* ctx)
+static void tb_disconnect_client(TicbuildRemoting* ctx, int index)
 {
-    if(ctx->client_sock != TB_INVALID_SOCKET)
+    if(index < 0 || index >= TB_MAX_CLIENTS) return;
+
+    tb_client* client = &ctx->clients[index];
+    if(client->sock != TB_INVALID_SOCKET)
     {
-        tb_close_socket(ctx->client_sock);
-        ctx->client_sock = TB_INVALID_SOCKET;
+        tb_close_socket(client->sock);
+        client->sock = TB_INVALID_SOCKET;
+        if(ctx->client_count > 0) ctx->client_count--;
     }
 
     tb_mark_title_dirty(ctx);
 
-    ctx->inlen = 0;
-    ctx->outlen = 0;
-    ctx->outpos = 0;
+    client->inlen = 0;
+    client->outlen = 0;
+    client->outpos = 0;
+    free(client->inbuf);
+    free(client->outbuf);
+    client->inbuf = NULL;
+    client->outbuf = NULL;
 }
 
 static void tb_accept_client(TicbuildRemoting* ctx)
 {
-    if(ctx->client_sock != TB_INVALID_SOCKET) return;
-
     struct sockaddr_in addr;
     int alen = (int)sizeof addr;
 
-    tb_socket c = (tb_socket)accept(ctx->listen_sock, (struct sockaddr*)&addr, &alen);
-    if(c == TB_INVALID_SOCKET)
+    for(;;)
     {
-        int err = tb_last_socket_error();
-        if(tb_would_block(err)) return;
-        return;
-    }
+        tb_socket c = (tb_socket)accept(ctx->listen_sock, (struct sockaddr*)&addr, &alen);
+        if(c == TB_INVALID_SOCKET)
+        {
+            int err = tb_last_socket_error();
+            if(tb_would_block(err)) return;
+            return;
+        }
 
-    (void)tb_set_nonblocking(c);
-    ctx->client_sock = c;
-    tb_mark_title_dirty(ctx);
+        int slot = -1;
+        for(int i = 0; i < TB_MAX_CLIENTS; i++)
+        {
+            if(ctx->clients[i].sock == TB_INVALID_SOCKET)
+            {
+                slot = i;
+                break;
+            }
+        }
+
+        if(slot < 0)
+        {
+            tb_close_socket(c);
+            continue;
+        }
+
+        (void)tb_set_nonblocking(c);
+        ctx->clients[slot].sock = c;
+        ctx->clients[slot].inlen = 0;
+        ctx->clients[slot].outlen = 0;
+        ctx->clients[slot].outpos = 0;
+        ctx->client_count++;
+        tb_mark_title_dirty(ctx);
+    }
 }
 
-static bool tb_read_client(TicbuildRemoting* ctx)
+static bool tb_read_client(TicbuildRemoting* ctx, int index)
 {
-    if(ctx->client_sock == TB_INVALID_SOCKET) return false;
+    if(index < 0 || index >= TB_MAX_CLIENTS) return false;
 
-    if(ctx->inbuf == NULL)
+    tb_client* client = &ctx->clients[index];
+    if(client->sock == TB_INVALID_SOCKET) return false;
+
+    if(client->inbuf == NULL)
     {
-        ctx->inbuf = (char*)malloc(TB_INBUF_LIMIT);
-        if(!ctx->inbuf) return false;
+        client->inbuf = (char*)malloc(TB_INBUF_LIMIT);
+        if(!client->inbuf) return false;
     }
 
     for(;;)
     {
-        if(ctx->inlen >= TB_INBUF_LIMIT)
+        if(client->inlen >= TB_INBUF_LIMIT)
         {
-            tb_disconnect_client(ctx);
+            tb_disconnect_client(ctx, index);
             return false;
         }
 
-        int r = (int)recv(ctx->client_sock, ctx->inbuf + ctx->inlen, (int)(TB_INBUF_LIMIT - ctx->inlen), 0);
+        int r = (int)recv(client->sock, client->inbuf + client->inlen, (int)(TB_INBUF_LIMIT - client->inlen), 0);
         if(r == 0)
         {
-            tb_disconnect_client(ctx);
+            tb_disconnect_client(ctx, index);
             return false;
         }
         if(r < 0)
         {
             int err = tb_last_socket_error();
             if(tb_would_block(err)) break;
-            tb_disconnect_client(ctx);
+            tb_disconnect_client(ctx, index);
             return false;
         }
 
-        ctx->inlen += (size_t)r;
+        client->inlen += (size_t)r;
     }
 
     return true;
 }
 
-static void tb_flush_output(TicbuildRemoting* ctx)
+static void tb_flush_output(TicbuildRemoting* ctx, int index)
 {
-    if(ctx->client_sock == TB_INVALID_SOCKET) return;
-    if(ctx->outpos >= ctx->outlen) return;
+    if(index < 0 || index >= TB_MAX_CLIENTS) return;
+
+    tb_client* client = &ctx->clients[index];
+    if(client->sock == TB_INVALID_SOCKET) return;
+    if(client->outpos >= client->outlen) return;
 
     for(;;)
     {
-        size_t remain = ctx->outlen - ctx->outpos;
+        size_t remain = client->outlen - client->outpos;
         if(remain == 0) break;
 
-        int r = (int)send(ctx->client_sock, ctx->outbuf + ctx->outpos, (int)remain, 0);
+        int r = (int)send(client->sock, client->outbuf + client->outpos, (int)remain, 0);
         if(r < 0)
         {
             int err = tb_last_socket_error();
             if(tb_would_block(err)) break;
-            tb_disconnect_client(ctx);
+            tb_disconnect_client(ctx, index);
             break;
         }
 
-        ctx->outpos += (size_t)r;
+        client->outpos += (size_t)r;
 
-        if(ctx->outpos == ctx->outlen)
+        if(client->outpos == client->outlen)
         {
-            ctx->outpos = 0;
-            ctx->outlen = 0;
-            free(ctx->outbuf);
-            ctx->outbuf = NULL;
+            client->outpos = 0;
+            client->outlen = 0;
+            free(client->outbuf);
+            client->outbuf = NULL;
             break;
         }
     }
 }
 
-static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
+static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char* line, size_t n)
 {
     char err[1000] = {0};
 
     // validation
     if(n > TB_LINE_LIMIT)
     {
-        tb_send_response_str(ctx, 0, false, "line too long");
+        tb_send_response_str(client, 0, false, "line too long");
         return;
     }
 
     if(!tb_is_ascii_only(line, n))
     {
-        tb_send_response_str(ctx, 0, false, "non-ascii input");
+        tb_send_response_str(client, 0, false, "non-ascii input");
         return;
     }
 
@@ -822,20 +834,20 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
     tb_slice tok;
     if(!tb_next_token(&p, &len, &tok, err, sizeof err))
     {
-        tb_send_response_str(ctx, 0, false, err[0] ? err : "missing id");
+        tb_send_response_str(client, 0, false, err[0] ? err : "missing id");
         return;
     }
 
     int64_t id;
     if(!tb_parse_int(tok, &id))
     {
-        tb_send_response_str(ctx, 0, false, "invalid id");
+        tb_send_response_str(client, 0, false, "invalid id");
         return;
     }
 
     if(!tb_next_token(&p, &len, &tok, err, sizeof err))
     {
-        tb_send_response_str(ctx, id, false, "missing command");
+        tb_send_response_str(client, id, false, "missing command");
         return;
     }
 
@@ -843,7 +855,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
     char cmd[64];
     if(tok.len >= sizeof cmd)
     {
-        tb_send_response_str(ctx, id, false, "command too long");
+        tb_send_response_str(client, id, false, "command too long");
         return;
     }
 
@@ -864,7 +876,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc >= (sizeof args / sizeof args[0]))
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "too many args");
+            tb_send_response_str(client, id, false, "too many args");
             return;
         }
 
@@ -875,7 +887,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
             if(!tb_parse_quoted(atok.ptr, atok.len, &decoded, &dlen, err, sizeof err))
             {
                 tb_free_args(args, argc);
-                tb_send_response_str(ctx, id, false, err);
+                tb_send_response_str(client, id, false, err);
                 return;
             }
             args[argc++] = (tb_arg){TB_ARG_STR, {.s = {decoded, dlen}}};
@@ -887,7 +899,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
             if(!tb_parse_bytes(atok.ptr, atok.len, &b, &blen, ctx, err, sizeof err))
             {
                 tb_free_args(args, argc);
-                tb_send_response_str(ctx, id, false, err);
+                tb_send_response_str(client, id, false, err);
                 return;
             }
             args[argc++] = (tb_arg){TB_ARG_BYTES, {.b = {b, blen}}};
@@ -898,7 +910,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
             if(!tb_parse_int(atok, &v))
             {
                 tb_free_args(args, argc);
-                tb_send_response_str(ctx, id, false, "invalid number");
+                tb_send_response_str(client, id, false, "invalid number");
                 return;
             }
             args[argc++] = (tb_arg){TB_ARG_INT, {.i = v}};
@@ -909,7 +921,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
     if(strcmp(cmd, "ping") == 0)
     {
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, true, "PONG");
+        tb_send_response_str(client, id, true, "PONG");
         return;
     }
 
@@ -927,7 +939,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         snprintf(data, sizeof data, "\"%s\"", esc);
 
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, true, data);
+        tb_send_response_str(client, id, true, data);
         return;
     }
 
@@ -936,20 +948,20 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 1 || args[0].type != TB_ARG_INT)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> sync <flags>");
+            tb_send_response_str(client, id, false, "usage: <id> sync <flags>");
             return;
         }
 
         if(!ctx->cb.sync)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "sync not supported");
+            tb_send_response_str(client, id, false, "sync not supported");
             return;
         }
 
         bool ok = ctx->cb.sync(ctx->cb.userdata, (uint32_t)args[0].v.i, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, ok, ok ? NULL : err);
+        tb_send_response_str(client, id, ok, ok ? NULL : err);
         return;
     }
 
@@ -958,7 +970,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 2 || args[0].type != TB_ARG_INT || args[1].type != TB_ARG_BYTES)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> poke <addr> <data>"
+            tb_send_response_str(client, id, false, "usage: <id> poke <addr> <data>"
             );
             return;
         }
@@ -966,13 +978,13 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(!ctx->cb.poke)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "poke not supported");
+            tb_send_response_str(client, id, false, "poke not supported");
             return;
         }
 
         bool ok = ctx->cb.poke(ctx->cb.userdata, (uint32_t)args[0].v.i, args[1].v.b.ptr, args[1].v.b.len, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, ok, ok ? NULL : err);
+        tb_send_response_str(client, id, ok, ok ? NULL : err);
         return;
     }
 
@@ -981,14 +993,14 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 2 || args[0].type != TB_ARG_INT || args[1].type != TB_ARG_INT)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> peek <addr> <size>");
+            tb_send_response_str(client, id, false, "usage: <id> peek <addr> <size>");
             return;
         }
 
         if(!ctx->cb.peek)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "peek not supported");
+            tb_send_response_str(client, id, false, "peek not supported");
             return;
         }
 
@@ -996,7 +1008,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(size == 0 || size > TB_PEEK_LIMIT)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "invalid size");
+            tb_send_response_str(client, id, false, "invalid size");
             return;
         }
 
@@ -1004,7 +1016,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(!tmp)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "out of memory");
+            tb_send_response_str(client, id, false, "out of memory");
             return;
         }
 
@@ -1012,9 +1024,9 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         tb_free_args(args, argc);
 
         if(ok)
-            tb_send_response_bytes(ctx, id, tmp, size);
+            tb_send_response_bytes(client, id, tmp, size);
         else
-            tb_send_response_str(ctx, id, false, err);
+            tb_send_response_str(client, id, false, err);
 
         free(tmp);
         return;
@@ -1025,21 +1037,21 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 2 || args[0].type != TB_ARG_STR || args[1].type != TB_ARG_INT)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> load \"path\" <run:1|0>");
+            tb_send_response_str(client, id, false, "usage: <id> load \"path\" <run:1|0>");
             return;
         }
 
         if(!ctx->cb.load)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "load not supported");
+            tb_send_response_str(client, id, false, "load not supported");
             return;
         }
 
         bool run = args[1].v.i ? true : false;
         bool ok = ctx->cb.load(ctx->cb.userdata, args[0].v.s.ptr, run, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, ok, ok ? NULL : err);
+        tb_send_response_str(client, id, ok, ok ? NULL : err);
         return;
     }
 
@@ -1048,18 +1060,18 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 0)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> restart");
+            tb_send_response_str(client, id, false, "usage: <id> restart");
             return;
         }
 
         if(!ctx->cb.restart)
         {
-            tb_send_response_str(ctx, id, false, "restart not supported");
+            tb_send_response_str(client, id, false, "restart not supported");
             return;
         }
 
         bool ok = ctx->cb.restart(ctx->cb.userdata, err, sizeof err);
-        tb_send_response_str(ctx, id, ok, ok ? NULL : err);
+        tb_send_response_str(client, id, ok, ok ? NULL : err);
         return;
     }
 
@@ -1068,18 +1080,18 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 0)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> quit");
+            tb_send_response_str(client, id, false, "usage: <id> quit");
             return;
         }
 
         if(!ctx->cb.quit)
         {
-            tb_send_response_str(ctx, id, false, "quit not supported");
+            tb_send_response_str(client, id, false, "quit not supported");
             return;
         }
 
         bool ok = ctx->cb.quit(ctx->cb.userdata, err, sizeof err);
-        tb_send_response_str(ctx, id, ok, ok ? NULL : err);
+        tb_send_response_str(client, id, ok, ok ? NULL : err);
         return;
     }
 
@@ -1088,20 +1100,20 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 1 || args[0].type != TB_ARG_STR)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> eval \"code\"");
+            tb_send_response_str(client, id, false, "usage: <id> eval \"code\"");
             return;
         }
 
         if(!ctx->cb.eval)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "eval not supported");
+            tb_send_response_str(client, id, false, "eval not supported");
             return;
         }
 
         bool ok = ctx->cb.eval(ctx->cb.userdata, args[0].v.s.ptr, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, ok, ok ? NULL : err);
+        tb_send_response_str(client, id, ok, ok ? NULL : err);
         return;
     }
 
@@ -1110,14 +1122,14 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 1 || args[0].type != TB_ARG_STR)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> evalexpr \"expr\"");
+            tb_send_response_str(client, id, false, "usage: <id> evalexpr \"expr\"");
             return;
         }
 
         if(!ctx->cb.eval_expr)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "evalexpr not supported");
+            tb_send_response_str(client, id, false, "evalexpr not supported");
             return;
         }
 
@@ -1125,7 +1137,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         out[0] = '\0';
         bool ok = ctx->cb.eval_expr(ctx->cb.userdata, args[0].v.s.ptr, out, sizeof out, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, ok, ok ? out : err);
+        tb_send_response_str(client, id, ok, ok ? out : err);
         return;
     }
 
@@ -1134,14 +1146,14 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 0)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> listglobals");
+            tb_send_response_str(client, id, false, "usage: <id> listglobals");
             return;
         }
 
         if(!ctx->cb.list_globals)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "listglobals not supported");
+            tb_send_response_str(client, id, false, "listglobals not supported");
             return;
         }
 
@@ -1150,13 +1162,13 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(!out)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "out of memory");
+            tb_send_response_str(client, id, false, "out of memory");
             return;
         }
         out[0] = '\0';
         bool ok = ctx->cb.list_globals(ctx->cb.userdata, out, outcap, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, ok, ok ? out : err);
+        tb_send_response_str(client, id, ok, ok ? out : err);
         free(out);
         return;
     }
@@ -1166,39 +1178,42 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         if(argc != 0)
         {
             tb_free_args(args, argc);
-            tb_send_response_str(ctx, id, false, "usage: <id> getfps");
+            tb_send_response_str(client, id, false, "usage: <id> getfps");
             return;
         }
 
         char data[32];
         snprintf(data, sizeof data, "%d", ticbuild_remoting_get_fps(ctx));
         tb_free_args(args, argc);
-        tb_send_response_str(ctx, id, true, data);
+        tb_send_response_str(client, id, true, data);
         return;
     }
 
     tb_free_args(args, argc);
-    tb_send_response_str(ctx, id, false, "unknown command");
+    tb_send_response_str(client, id, false, "unknown command");
 }
 
 // pushes complete lines out of inbuf to handler.
-static void tb_process_input(TicbuildRemoting* ctx)
+static void tb_process_input(TicbuildRemoting* ctx, int index)
 {
-    if(ctx->inlen == 0) return;
+    if(index < 0 || index >= TB_MAX_CLIENTS) return;
+
+    tb_client* client = &ctx->clients[index];
+    if(client->inlen == 0) return;
 
     // process in complete lines
     size_t start = 0;
-    for(size_t i = 0; i < ctx->inlen; i++)
+    for(size_t i = 0; i < client->inlen; i++)
     {
-        if(ctx->inbuf[i] == '\n')
+        if(client->inbuf[i] == '\n')
         {
             size_t linelen = i - start;
             // for CRLF line endings, trim the CR
-            if(linelen && ctx->inbuf[start + linelen - 1] == '\r')
+            if(linelen && client->inbuf[start + linelen - 1] == '\r')
                 linelen--;
 
             // dispatch in complete lines
-            tb_handle_line(ctx, ctx->inbuf + start, linelen);
+            tb_handle_line(ctx, client, client->inbuf + start, linelen);
             start = i + 1;
         }
     }
@@ -1206,8 +1221,8 @@ static void tb_process_input(TicbuildRemoting* ctx)
     // move remaining partial line to start of buffer
     if(start > 0)
     {
-        memmove(ctx->inbuf, ctx->inbuf + start, ctx->inlen - start);
-        ctx->inlen -= start;
+        memmove(client->inbuf, client->inbuf + start, client->inlen - start);
+        client->inlen -= start;
     }
 }
 
@@ -1224,7 +1239,17 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_cal
     tb_fps_init(&ctx->fps);
 
     ctx->listen_sock = TB_INVALID_SOCKET;
-    ctx->client_sock = TB_INVALID_SOCKET;
+    ctx->client_count = 0;
+    ctx->last_client_count = 0;
+    for(int i = 0; i < TB_MAX_CLIENTS; i++)
+    {
+        ctx->clients[i].sock = TB_INVALID_SOCKET;
+        ctx->clients[i].inbuf = NULL;
+        ctx->clients[i].inlen = 0;
+        ctx->clients[i].outbuf = NULL;
+        ctx->clients[i].outlen = 0;
+        ctx->clients[i].outpos = 0;
+    }
 
     char err[128];
     if(!tb_socket_init(ctx, err, sizeof err))
@@ -1240,7 +1265,8 @@ void ticbuild_remoting_close(TicbuildRemoting* ctx)
 {
     if(!ctx) return;
 
-    tb_disconnect_client(ctx);
+    for(int i = 0; i < TB_MAX_CLIENTS; i++)
+        tb_disconnect_client(ctx, i);
 
     if(ctx->listen_sock != TB_INVALID_SOCKET)
     {
@@ -1251,8 +1277,6 @@ void ticbuild_remoting_close(TicbuildRemoting* ctx)
     if(ctx->wsa_started)
         WSACleanup();
 
-    free(ctx->inbuf);
-    free(ctx->outbuf);
     free(ctx->tmpbytes);
     free(ctx);
 }
@@ -1278,20 +1302,18 @@ void ticbuild_remoting_tick(TicbuildRemoting* ctx)
 
     tb_accept_client(ctx);
 
-    tb_flush_output(ctx);
-
-    if(ctx->client_sock != TB_INVALID_SOCKET)
+    for(int i = 0; i < TB_MAX_CLIENTS; i++)
     {
-        tb_read_client(ctx);
-        tb_process_input(ctx);
-        tb_flush_output(ctx);
+        if(ctx->clients[i].sock == TB_INVALID_SOCKET) continue;
+        tb_read_client(ctx, i);
+        tb_process_input(ctx, i);
+        tb_flush_output(ctx, i);
     }
 
     // Track connect/disconnect changes that happened during the tick.
-    bool connected = (ctx->client_sock != TB_INVALID_SOCKET);
-    if(connected != ctx->last_client_connected)
+    if(ctx->client_count != ctx->last_client_count)
     {
-        ctx->last_client_connected = connected;
+        ctx->last_client_count = ctx->client_count;
         tb_mark_title_dirty(ctx);
     }
 }
