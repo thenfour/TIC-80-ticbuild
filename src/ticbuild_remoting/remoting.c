@@ -1059,6 +1059,30 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         return;
     }
 
+    if(strcmp(cmd, "evalexpr") == 0)
+    {
+        if(argc != 1 || args[0].type != TB_ARG_STR)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(ctx, id, false, "usage: <id> evalexpr \"expr\"");
+            return;
+        }
+
+        if(!ctx->cb.eval_expr)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(ctx, id, false, "evalexpr not supported");
+            return;
+        }
+
+        char out[1024];
+        out[0] = '\0';
+        bool ok = ctx->cb.eval_expr(ctx->cb.userdata, args[0].v.s.ptr, out, sizeof out, err, sizeof err);
+        tb_free_args(args, argc);
+        tb_send_response_str(ctx, id, ok, ok ? out : err);
+        return;
+    }
+
     if(strcmp(cmd, "getfps") == 0)
     {
         if(argc != 0)

@@ -61,6 +61,7 @@
 #include "screens/mainmenu.h"
 
 #include "api.h"
+#include "ticbuild_remoting/lua_eval.h"
 
 #include "fs.h"
 
@@ -372,6 +373,34 @@ static bool remoting_eval(void* userdata, const char* code, char* err, size_t er
 
     if(err && errcap) { strncpy(err, "eval not implemented for this script", errcap - 1); err[errcap - 1] = '\0'; }
     return false;
+}
+
+static bool remoting_eval_expr(void* userdata, const char* expr, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "evalexpr not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!expr || !expr[0])
+    {
+        if(err && errcap) { strncpy(err, "missing expression", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(!script_config || !script_config->name || strcmp(script_config->name, "lua") != 0)
+    {
+        if(err && errcap) { strncpy(err, "evalexpr only supported for lua", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    return tb_lua_eval_expr(studio->tic, expr, out, outcap, err, errcap);
 }
 #endif
 
@@ -3084,6 +3113,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .poke = remoting_poke,
             .peek = remoting_peek,
             .eval = remoting_eval,
+            .eval_expr = remoting_eval_expr,
         };
 
         studio->remoting = ticbuild_remoting_create(studio->remotingPort, &cb);
