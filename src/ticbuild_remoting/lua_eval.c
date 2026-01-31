@@ -1,6 +1,7 @@
 #include "lua_eval.h"
 
 #include "core/core.h"
+#include "lua_serialize.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -60,35 +61,7 @@ bool tb_lua_eval_expr(tic_mem* tic, const char* expr, char* out, size_t outcap, 
 
     free(chunk);
 
-    int type = lua_type(lua, -1);
-    if(type == LUA_TFUNCTION || type == LUA_TTHREAD || type == LUA_TUSERDATA || type == LUA_TLIGHTUSERDATA)
-    {
-        const char* tname = lua_typename(lua, type);
-        if(err && errcap)
-        {
-            if(tname)
-                snprintf(err, errcap, "unsupported result type: %s", tname);
-            else
-            {
-                strncpy(err, "unsupported result type", errcap - 1);
-                err[errcap - 1] = '\0';
-            }
-        }
-        lua_settop(lua, 0);
-        return false;
-    }
-
-    size_t len = 0;
-    const char* str = luaL_tolstring(lua, -1, &len);
-    if(!str) str = "";
-
-    if(out && outcap)
-    {
-        size_t copy = len < outcap - 1 ? len : outcap - 1;
-        memcpy(out, str, copy);
-        out[copy] = '\0';
-    }
-
-    lua_pop(lua, 2);
-    return true;
+    bool ok = tb_lua_serialize_expr(lua, -1, out, outcap, err, errcap);
+    lua_settop(lua, 0);
+    return ok;
 }

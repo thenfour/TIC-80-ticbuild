@@ -31,6 +31,7 @@ if(BUILD_EDITORS)
         ${TIC80LIB_DIR}/ticbuild_remoting/user_timing.c
         ${TIC80LIB_DIR}/ticbuild_remoting/remoting.c
         ${TIC80LIB_DIR}/ticbuild_remoting/lua_eval.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/lua_serialize.c
         ${TIC80LIB_DIR}/ext/history.c
         ${TIC80LIB_DIR}/ext/gif.c
     )
