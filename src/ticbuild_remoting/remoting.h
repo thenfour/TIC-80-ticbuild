@@ -26,6 +26,7 @@ typedef struct
 
     bool (*eval)(void* userdata, const char* code, char* err, size_t errcap);
     bool (*eval_expr)(void* userdata, const char* expr, char* out, size_t outcap, char* err, size_t errcap);
+    bool (*list_globals)(void* userdata, char* out, size_t outcap, char* err, size_t errcap);
 } ticbuild_remoting_callbacks;
 
 TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_callbacks* callbacks);

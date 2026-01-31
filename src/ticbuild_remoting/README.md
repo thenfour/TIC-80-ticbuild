@@ -53,6 +53,14 @@ binds to `127.0.0.1`. Single connection supported for simplicity.
     - `eval <code>` - no return possible (`tic_script.eval` has `void` return type).
       you could just make the script do something visible, like `poke()`.
       - TODO: enable trace output to remote? or support return data?
+    - `evalexpr <expression>` - returns the result of the given single expression.
+      It's effectively your expression with `return` prepended, allowing syntax like `1+3`
+      or `width * size`
+      without having to type `return width * size`. That can cause issues if you need
+      to execute a lot of code, but always workaroundable with something like,
+      `evelexpr "(function() ... end)()"`.
+    - `listglobals` - returns a single-line, comma-separated list of eval-able
+      global symbols (identifier keys from the Lua global environment).
     - `getfps` - gets current FPS
   - datatypes
     - numbers

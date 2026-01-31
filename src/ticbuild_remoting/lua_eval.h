@@ -6,3 +6,4 @@
 #include <stddef.h>
 
 bool tb_lua_eval_expr(tic_mem* tic, const char* expr, char* out, size_t outcap, char* err, size_t errcap);
+bool tb_lua_list_globals(tic_mem* tic, char* out, size_t outcap, char* err, size_t errcap);

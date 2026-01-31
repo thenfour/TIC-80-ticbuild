@@ -518,6 +518,23 @@ static size_t tb_escape_string(const char* s, size_t n, char* out, size_t outcap
     return j;
 }
 
+static size_t tb_escape_string_len(const char* s, size_t n)
+{
+    size_t j = 0;
+
+    for(size_t i = 0; i < n; i++)
+    {
+        char c = s[i];
+        if((unsigned char)c > 0x7F) c = '?';
+        if(c == '\\' || c == '"')
+            j += 2;
+        else
+            j += 1;
+    }
+
+    return j;
+}
+
 static void tb_queue_output(TicbuildRemoting* ctx, const char* s, size_t n)
 {
     if(n == 0) return;
@@ -538,23 +555,52 @@ static void tb_queue_output(TicbuildRemoting* ctx, const char* s, size_t n)
 
 static void tb_send_response_str(TicbuildRemoting* ctx, int64_t id, bool ok, const char* data)
 {
-    char line[2048];
     if(ok)
     {
-        if(data && data[0])
-            snprintf(line, sizeof line, "%lld OK %s\n", (long long)id, data);
-        else
-            snprintf(line, sizeof line, "%lld OK\n", (long long)id);
+        const char* payload = (data && data[0]) ? data : NULL;
+        size_t cap = (size_t)snprintf(NULL, 0, "%lld OK%s%s\n", (long long)id, payload ? " " : "", payload ? payload : "") + 1;
+        char* line = (char*)malloc(cap);
+        if(!line)
+        {
+            char fallback[64];
+            snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
+            tb_queue_output(ctx, fallback, strlen(fallback));
+            return;
+        }
+        snprintf(line, cap, "%lld OK%s%s\n", (long long)id, payload ? " " : "", payload ? payload : "");
+        tb_queue_output(ctx, line, strlen(line));
+        free(line);
     }
     else
     {
-        char esc[1500];
-        size_t elen = tb_escape_string(data ? data : "error", strlen(data ? data : "error"), esc, sizeof esc);
-        (void)elen;
-        snprintf(line, sizeof line, "%lld ERR \"%s\"\n", (long long)id, esc);
-    }
+        const char* msg = data ? data : "error";
+        size_t mlen = strlen(msg);
+        size_t elen = tb_escape_string_len(msg, mlen);
+        char* esc = (char*)malloc(elen + 1);
+        if(!esc)
+        {
+            char fallback[64];
+            snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
+            tb_queue_output(ctx, fallback, strlen(fallback));
+            return;
+        }
+        tb_escape_string(msg, mlen, esc, elen + 1);
 
-    tb_queue_output(ctx, line, strlen(line));
+        size_t cap = (size_t)snprintf(NULL, 0, "%lld ERR \"%s\"\n", (long long)id, esc) + 1;
+        char* line = (char*)malloc(cap);
+        if(!line)
+        {
+            char fallback[64];
+            snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
+            tb_queue_output(ctx, fallback, strlen(fallback));
+            free(esc);
+            return;
+        }
+        snprintf(line, cap, "%lld ERR \"%s\"\n", (long long)id, esc);
+        tb_queue_output(ctx, line, strlen(line));
+        free(esc);
+        free(line);
+    }
 }
 
 static void tb_send_response_bytes(TicbuildRemoting* ctx, int64_t id, const uint8_t* bytes, size_t n)
@@ -1080,6 +1126,38 @@ static void tb_handle_line(TicbuildRemoting* ctx, const char* line, size_t n)
         bool ok = ctx->cb.eval_expr(ctx->cb.userdata, args[0].v.s.ptr, out, sizeof out, err, sizeof err);
         tb_free_args(args, argc);
         tb_send_response_str(ctx, id, ok, ok ? out : err);
+        return;
+    }
+
+    if(strcmp(cmd, "listglobals") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(ctx, id, false, "usage: <id> listglobals");
+            return;
+        }
+
+        if(!ctx->cb.list_globals)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(ctx, id, false, "listglobals not supported");
+            return;
+        }
+
+        size_t outcap = TB_OUTBUF_LIMIT > 128 ? (TB_OUTBUF_LIMIT - 128) : TB_OUTBUF_LIMIT;
+        char* out = (char*)malloc(outcap);
+        if(!out)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(ctx, id, false, "out of memory");
+            return;
+        }
+        out[0] = '\0';
+        bool ok = ctx->cb.list_globals(ctx->cb.userdata, out, outcap, err, sizeof err);
+        tb_free_args(args, argc);
+        tb_send_response_str(ctx, id, ok, ok ? out : err);
+        free(out);
         return;
     }
 

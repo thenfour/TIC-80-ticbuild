@@ -402,6 +402,28 @@ static bool remoting_eval_expr(void* userdata, const char* expr, char* out, size
 
     return tb_lua_eval_expr(studio->tic, expr, out, outcap, err, errcap);
 }
+
+static bool remoting_list_globals(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "listglobals not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(!script_config || !script_config->name || strcmp(script_config->name, "lua") != 0)
+    {
+        if(err && errcap) { strncpy(err, "listglobals only supported for lua", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    return tb_lua_list_globals(studio->tic, out, outcap, err, errcap);
+}
 #endif
 
 void fadePalette(tic_palette* pal, s32 value)
@@ -3114,6 +3136,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .peek = remoting_peek,
             .eval = remoting_eval,
             .eval_expr = remoting_eval_expr,
+            .list_globals = remoting_list_globals,
         };
 
         studio->remoting = ticbuild_remoting_create(studio->remotingPort, &cb);
