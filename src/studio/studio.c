@@ -424,6 +424,66 @@ static bool remoting_list_globals(void* userdata, char* out, size_t outcap, char
 
     return tb_lua_list_globals(studio->tic, out, outcap, err, errcap);
 }
+
+static bool remoting_cart_path(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->console)
+    {
+        if(err && errcap) { strncpy(err, "cartpath not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out || outcap == 0)
+    {
+        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const char* path = studio->console->rom.path;
+    if(!path || !path[0])
+    {
+        out[0] = '\0';
+        return true;
+    }
+
+    strncpy(out, path, outcap - 1);
+    out[outcap - 1] = '\0';
+    return true;
+}
+
+static bool remoting_fs_path(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->fs)
+    {
+        if(err && errcap) { strncpy(err, "fs not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out || outcap == 0)
+    {
+        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const char* path = tic_fs_pathroot(studio->fs, "");
+    if(!path)
+    {
+        out[0] = '\0';
+        return true;
+    }
+
+    strncpy(out, path, outcap - 1);
+    out[outcap - 1] = '\0';
+    return true;
+}
 #endif
 
 void fadePalette(tic_palette* pal, s32 value)
@@ -3137,6 +3197,8 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .eval = remoting_eval,
             .eval_expr = remoting_eval_expr,
             .list_globals = remoting_list_globals,
+            .cart_path = remoting_cart_path,
+            .fs_path = remoting_fs_path,
         };
 
         studio->remoting = ticbuild_remoting_create(studio->remotingPort, &cb);

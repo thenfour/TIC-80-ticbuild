@@ -64,6 +64,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
     - `getfps` - gets current FPS
     - `cartpath` - returns the full path to the currently open cartridge.
       empty string if there's no open cart.
+    - `fs` - returns the current filesystem local path (the one you can control via command line `--fs=...`)
   - datatypes
     - numbers
       - Only integers for the moment. No fancy `1e3` forms, just:

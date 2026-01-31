@@ -1198,6 +1198,116 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         return;
     }
 
+    if(strcmp(cmd, "cartpath") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> cartpath");
+            return;
+        }
+
+        if(!ctx->cb.cart_path)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "cartpath not supported");
+            return;
+        }
+
+        char raw[1024];
+        raw[0] = '\0';
+        bool ok = ctx->cb.cart_path(ctx->cb.userdata, raw, sizeof raw, err, sizeof err);
+        tb_free_args(args, argc);
+        if(!ok)
+        {
+            tb_send_response_str(client, id, false, err);
+            return;
+        }
+
+        size_t rawlen = strlen(raw);
+        size_t esc_len = tb_escape_string_len(raw, rawlen);
+        char* esc = (char*)malloc(esc_len + 1);
+        if(!esc)
+        {
+            tb_send_response_str(client, id, false, "out of memory");
+            return;
+        }
+        tb_escape_string(raw, rawlen, esc, esc_len + 1);
+
+        size_t data_len = esc_len + 2;
+        char* data = (char*)malloc(data_len + 1);
+        if(!data)
+        {
+            free(esc);
+            tb_send_response_str(client, id, false, "out of memory");
+            return;
+        }
+        data[0] = '"';
+        memcpy(data + 1, esc, esc_len);
+        data[1 + esc_len] = '"';
+        data[2 + esc_len] = '\0';
+
+        tb_send_response_str(client, id, true, data);
+        free(esc);
+        free(data);
+        return;
+    }
+
+    if(strcmp(cmd, "fs") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> fs");
+            return;
+        }
+
+        if(!ctx->cb.fs_path)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "fs not supported");
+            return;
+        }
+
+        char raw[1024];
+        raw[0] = '\0';
+        bool ok = ctx->cb.fs_path(ctx->cb.userdata, raw, sizeof raw, err, sizeof err);
+        tb_free_args(args, argc);
+        if(!ok)
+        {
+            tb_send_response_str(client, id, false, err);
+            return;
+        }
+
+        size_t rawlen = strlen(raw);
+        size_t esc_len = tb_escape_string_len(raw, rawlen);
+        char* esc = (char*)malloc(esc_len + 1);
+        if(!esc)
+        {
+            tb_send_response_str(client, id, false, "out of memory");
+            return;
+        }
+        tb_escape_string(raw, rawlen, esc, esc_len + 1);
+
+        size_t data_len = esc_len + 2;
+        char* data = (char*)malloc(data_len + 1);
+        if(!data)
+        {
+            free(esc);
+            tb_send_response_str(client, id, false, "out of memory");
+            return;
+        }
+        data[0] = '"';
+        memcpy(data + 1, esc, esc_len);
+        data[1 + esc_len] = '"';
+        data[2 + esc_len] = '\0';
+
+        tb_send_response_str(client, id, true, data);
+        free(esc);
+        free(data);
+        return;
+    }
+
     tb_free_args(args, argc);
     tb_send_response_str(client, id, false, "unknown command");
 }
