@@ -15,7 +15,7 @@ We add a command line arg:
 `tic80.exe --remoting-port=9977`
 
 While TIC-80 is running, it will listen on this port for remote commands. Always
-binds to `127.0.0.1`. Single connection supported for simplicity.
+binds to `127.0.0.1`. Up to 10 clients supported.
 
 # Protocol
 
@@ -62,6 +62,8 @@ binds to `127.0.0.1`. Single connection supported for simplicity.
     - `listglobals` - returns a single-line, comma-separated list of eval-able
       global symbols (identifier keys from the Lua global environment).
     - `getfps` - gets current FPS
+    - `cartpath` - returns the full path to the currently open cartridge.
+      empty string if there's no open cart.
   - datatypes
     - numbers
       - Only integers for the moment. No fancy `1e3` forms, just:
@@ -90,6 +92,30 @@ binds to `127.0.0.1`. Single connection supported for simplicity.
       - (this is the only one supported so far)
 - Commands to be queued and executed at a deterministic safe point in the
   TIC-80 system loop (e.g., between frames if the cart is running)
+
+# Discovery Protocol
+
+When the remoting server is listening, we will make the server discoverable by
+placing a json file on the filesystem.
+
+If the file already exists, it shall be overwritten.
+
+The file is to be deleted when the server stops listening.
+
+The file will be placed in `%LOCALAPPDATA%\TIC-80\remoting\sessions\` and
+the file is to be named `tic80-remote.<pid>.json`. Its contents will look like,
+
+```json
+{
+  "pid": 1234,
+  "host": "127.0.0.1",
+  "port": 51000,
+  "startedAt": "2026-01-31T19:50:26.859Z",
+  "remotingVersion": "v1"
+}
+```
+
+- `remotingVersion` is the same as in the `hello` command.
 
 # code structure
 
