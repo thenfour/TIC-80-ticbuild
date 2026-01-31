@@ -65,6 +65,8 @@ binds to `127.0.0.1`. Up to 10 clients supported.
     - `cartpath` - returns the full path to the currently open cartridge.
       empty string if there's no open cart.
     - `fs` - returns the current filesystem local path (the one you can control via command line `--fs=...`)
+    - `metadata <key>` - returns the value for the metadata value in code.
+      See: https://github.com/nesbox/TIC-80/wiki/Cartridge-Metadata.
   - datatypes
     - numbers
       - Only integers for the moment. No fancy `1e3` forms, just:

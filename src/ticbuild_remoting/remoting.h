@@ -29,6 +29,7 @@ typedef struct
     bool (*list_globals)(void* userdata, char* out, size_t outcap, char* err, size_t errcap);
     bool (*cart_path)(void* userdata, char* out, size_t outcap, char* err, size_t errcap);
     bool (*fs_path)(void* userdata, char* out, size_t outcap, char* err, size_t errcap);
+    bool (*metadata)(void* userdata, const char* key, char* out, size_t outcap, char* err, size_t errcap);
 } ticbuild_remoting_callbacks;
 
 TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_callbacks* callbacks);

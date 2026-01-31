@@ -252,6 +252,7 @@ static void emptyDone(void* data) {}
 #if defined(BUILD_EDITORS)
 
 // Remoting callbacks; put here so they can access studio things.
+const char* tic_tool_metatag(const char* code, const char* tag, const char* comment);
 static void remoting_hello(void* userdata, char* out, size_t outcap)
 {
     (void)userdata;
@@ -481,6 +482,41 @@ static bool remoting_fs_path(void* userdata, char* out, size_t outcap, char* err
     }
 
     strncpy(out, path, outcap - 1);
+    out[outcap - 1] = '\0';
+    return true;
+}
+
+static bool remoting_metadata(void* userdata, const char* key, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "metadata not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!key || !key[0])
+    {
+        if(err && errcap) { strncpy(err, "missing key", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out || outcap == 0)
+    {
+        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script = tic_get_script(studio->tic);
+    const char* comment = script ? script->singleComment : NULL;
+    const char* value = tic_tool_metatag(studio->tic->cart.code.data, key, comment);
+    if(value == NULL || value[0] == '\0')
+        value = tic_tool_metatag(studio->tic->cart.code.data, key, NULL);
+
+    strncpy(out, value ? value : "", outcap - 1);
     out[outcap - 1] = '\0';
     return true;
 }
@@ -3199,6 +3235,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .list_globals = remoting_list_globals,
             .cart_path = remoting_cart_path,
             .fs_path = remoting_fs_path,
+            .metadata = remoting_metadata,
         };
 
         studio->remoting = ticbuild_remoting_create(studio->remotingPort, &cb);
