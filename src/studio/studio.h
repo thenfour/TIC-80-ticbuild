@@ -103,6 +103,7 @@ typedef struct
 #undef  CMD_PARAMS_DEF
 
     s32 remotingPort;
+    const char *remoteSessionLocation;
 
 #if defined(BUILD_EDITORS)
     const char *codeexport;

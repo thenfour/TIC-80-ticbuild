@@ -73,24 +73,36 @@ static bool tb_ensure_dir(const char* path, char* err, size_t errcap)
     return true;
 }
 
-bool tb_discovery_start(int port, char* err, size_t errcap)
+bool tb_discovery_start(int port, const char* session_dir, char* err, size_t errcap)
 {
     if(g_discovery_active)
         return true;
 
-    const char* local = getenv("LOCALAPPDATA");
-    if(!local || !local[0])
-    {
-        tb_set_err(err, errcap, "LOCALAPPDATA not set");
-        return false;
-    }
-
     char dir[MAX_PATH];
-    int dlen = snprintf(dir, sizeof dir, "%s\\TIC-80\\remoting\\sessions", local);
-    if(dlen < 0 || (size_t)dlen >= sizeof dir)
+    if(session_dir && session_dir[0])
     {
-        tb_set_err(err, errcap, "discovery path too long");
-        return false;
+        int dlen = snprintf(dir, sizeof dir, "%s", session_dir);
+        if(dlen < 0 || (size_t)dlen >= sizeof dir)
+        {
+            tb_set_err(err, errcap, "discovery path too long");
+            return false;
+        }
+    }
+    else
+    {
+        const char* local = getenv("LOCALAPPDATA");
+        if(!local || !local[0])
+        {
+            tb_set_err(err, errcap, "LOCALAPPDATA not set");
+            return false;
+        }
+
+        int dlen = snprintf(dir, sizeof dir, "%s\\TIC-80\\remoting\\sessions", local);
+        if(dlen < 0 || (size_t)dlen >= sizeof dir)
+        {
+            tb_set_err(err, errcap, "discovery path too long");
+            return false;
+        }
     }
 
     if(!tb_ensure_dir(dir, err, errcap))

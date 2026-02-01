@@ -120,6 +120,13 @@ the file is to be named `tic80-remote.<pid>.json`. Its contents will look like,
 
 - `remotingVersion` is the same as in the `hello` command.
 
+We also must support a new command line arg, for specifying where to output the
+remote session file.
+
+`tic80.exe --remote-session-location=c:\my\folder`
+
+will write the discovery file as `c:\my\folder\tic80-remote.<pid>.json`
+
 # code structure
 
 changes to existing "official" TIC-80 code to be surgical and minimal. put our own

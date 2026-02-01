@@ -2996,6 +2996,7 @@ static StartArgs parseArgs(s32 argc, char **argv)
 #if defined(BUILD_EDITORS)
 
         OPT_INTEGER('\0', "remoting-port", &args.remotingPort, "listen on 127.0.0.1:<port> for ticbuild remoting"),
+        OPT_STRING('\0', "remote-session-location", &args.remoteSessionLocation, "directory to write remoting discovery file"),
 
         OPT_GROUP("Byte battle options:\n"),
         OPT_STRING('\0',    "codeexport",    &args.codeexport,   "export code to filename"),
@@ -3238,7 +3239,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .metadata = remoting_metadata,
         };
 
-        studio->remoting = ticbuild_remoting_create(studio->remotingPort, &cb);
+        studio->remoting = ticbuild_remoting_create(studio->remotingPort, args.remoteSessionLocation, &cb);
     }
 
     initSurfMode(studio);

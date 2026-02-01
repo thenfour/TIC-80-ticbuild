@@ -11,9 +11,9 @@
 
 struct TicbuildRemoting { int unused; };
 
-TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_callbacks* callbacks)
+TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, const ticbuild_remoting_callbacks* callbacks)
 {
-    (void)port; (void)callbacks;
+    (void)port; (void)session_dir; (void)callbacks;
     return NULL;
 }
 
@@ -97,6 +97,8 @@ struct TicbuildRemoting
 {
     int port;
     ticbuild_remoting_callbacks cb;
+
+    char* discovery_dir;
 
     // FPS tracking (time-window moving average)
     tb_fps_tracker fps;
@@ -671,7 +673,7 @@ static bool tb_socket_init(TicbuildRemoting* ctx, char* err, size_t errcap)
 
 #if defined(_WIN32) || defined(__TIC_WINDOWS__)
     // Best-effort discovery file creation; don't block remoting on failure.
-    tb_discovery_start(ctx->port, NULL, 0);
+    tb_discovery_start(ctx->port, ctx->discovery_dir, NULL, 0);
 #endif
     return true;
 }
@@ -1400,7 +1402,7 @@ static void tb_process_input(TicbuildRemoting* ctx, int index)
     }
 }
 
-TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_callbacks* callbacks)
+TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, const ticbuild_remoting_callbacks* callbacks)
 {
     if(port <= 0) return NULL;
 
@@ -1409,6 +1411,9 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const ticbuild_remoting_cal
 
     ctx->port = port;
     if(callbacks) ctx->cb = *callbacks;
+
+    if(session_dir && session_dir[0])
+        ctx->discovery_dir = strdup(session_dir);
 
     tb_fps_init(&ctx->fps);
 
@@ -1454,6 +1459,7 @@ void ticbuild_remoting_close(TicbuildRemoting* ctx)
         WSACleanup();
 
     free(ctx->tmpbytes);
+    free(ctx->discovery_dir);
     free(ctx);
 }
 
