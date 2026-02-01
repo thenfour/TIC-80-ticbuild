@@ -40,6 +40,8 @@
 #include "screens/surf.h"
 #include "ext/history.h"
 #include "net.h"
+#include "ticbuild_remoting/remoting.h"
+#include "ticbuild_remoting/user_timing.h"
 #include "wave_writer.h"
 #include "ext/gif.h"
 #define MSF_GIF_IMPL
@@ -57,6 +59,9 @@
 #include "screens/run.h"
 #include "screens/menu.h"
 #include "screens/mainmenu.h"
+
+#include "api.h"
+#include "ticbuild_remoting/lua_eval.h"
 
 #include "fs.h"
 
@@ -222,6 +227,9 @@ struct Studio
 
     tic_net* net;
 
+    TicbuildRemoting* remoting;
+    s32 remotingPort;
+
     Bytebattle bytebattle;
 
 #endif
@@ -240,6 +248,279 @@ struct Studio
 };
 
 static void emptyDone(void* data) {}
+
+#if defined(BUILD_EDITORS)
+
+// Remoting callbacks; put here so they can access studio things.
+const char* tic_tool_metatag(const char* code, const char* tag, const char* comment);
+static void remoting_hello(void* userdata, char* out, size_t outcap)
+{
+    (void)userdata;
+
+    if(!out || outcap == 0)
+        return;
+
+    snprintf(out, outcap, "%s remoting v1", TIC_NAME);
+}
+
+static bool remoting_load(void* userdata, const char* cart_path, bool run, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(!studio || !studio->console || !studio->console->loadCart)
+    {
+        if(err && errcap) { strncpy(err, "load not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!cart_path || !cart_path[0])
+    {
+        if(err && errcap) { strncpy(err, "missing path", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!studio->console->loadCart(studio->console, cart_path))
+    {
+        if(err && errcap) { strncpy(err, "failed to load cart", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(run)
+        runGame(studio);
+
+    return true;
+}
+
+static bool remoting_restart(void* userdata, char* err, size_t errcap)
+{
+    (void)err; (void)errcap;
+    Studio* studio = (Studio*)userdata;
+    if(!studio) return false;
+
+    runGame(studio);
+    return true;
+}
+
+static bool remoting_quit(void* userdata, char* err, size_t errcap)
+{
+    (void)err; (void)errcap;
+    Studio* studio = (Studio*)userdata;
+    if(!studio) return false;
+
+    // studio_alive() means "should exit" (main loop runs while !studio_alive()).
+    // Make quit deterministic: no interactive dialogs.
+    studio->alive = true;
+    return true;
+}
+
+static bool remoting_sync(void* userdata, uint32_t flags, char* err, size_t errcap)
+{
+    (void)err; (void)errcap;
+    Studio* studio = (Studio*)userdata;
+    if(!studio || !studio->tic) return false;
+
+    tic_api_sync(studio->tic, (s32)flags, 0, false);
+    return true;
+}
+
+static bool remoting_poke(void* userdata, uint32_t addr, const uint8_t* data, size_t size, char* err, size_t errcap)
+{
+    (void)err; (void)errcap;
+    Studio* studio = (Studio*)userdata;
+    if(!studio || !studio->tic) return false;
+    if(!data && size) return false;
+
+    for(size_t i = 0; i < size; i++)
+        tic_api_poke(studio->tic, (s32)(addr + (uint32_t)i), data[i], 8);
+
+    return true;
+}
+
+static bool remoting_peek(void* userdata, uint32_t addr, uint32_t size, uint8_t* out, char* err, size_t errcap)
+{
+    (void)err; (void)errcap;
+    Studio* studio = (Studio*)userdata;
+    if(!studio || !studio->tic) return false;
+    if(!out && size) return false;
+
+    for(uint32_t i = 0; i < size; i++)
+        out[i] = (uint8_t)tic_api_peek(studio->tic, (s32)(addr + i), 8);
+
+    return true;
+}
+
+static bool remoting_eval(void* userdata, const char* code, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "eval not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!code || !code[0])
+    {
+        if(err && errcap) { strncpy(err, "missing code", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(script_config && script_config->eval)
+    {
+        script_config->eval(studio->tic, code);
+        return true;
+    }
+
+    if(err && errcap) { strncpy(err, "eval not implemented for this script", errcap - 1); err[errcap - 1] = '\0'; }
+    return false;
+}
+
+static bool remoting_eval_expr(void* userdata, const char* expr, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "evalexpr not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!expr || !expr[0])
+    {
+        if(err && errcap) { strncpy(err, "missing expression", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(!script_config || !script_config->name || strcmp(script_config->name, "lua") != 0)
+    {
+        if(err && errcap) { strncpy(err, "evalexpr only supported for lua", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    return tb_lua_eval_expr(studio->tic, expr, out, outcap, err, errcap);
+}
+
+static bool remoting_list_globals(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "listglobals not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(!script_config || !script_config->name || strcmp(script_config->name, "lua") != 0)
+    {
+        if(err && errcap) { strncpy(err, "listglobals only supported for lua", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    return tb_lua_list_globals(studio->tic, out, outcap, err, errcap);
+}
+
+static bool remoting_cart_path(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->console)
+    {
+        if(err && errcap) { strncpy(err, "cartpath not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out || outcap == 0)
+    {
+        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const char* path = studio->console->rom.path;
+    if(!path || !path[0])
+    {
+        out[0] = '\0';
+        return true;
+    }
+
+    strncpy(out, path, outcap - 1);
+    out[outcap - 1] = '\0';
+    return true;
+}
+
+static bool remoting_fs_path(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->fs)
+    {
+        if(err && errcap) { strncpy(err, "fs not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out || outcap == 0)
+    {
+        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const char* path = tic_fs_pathroot(studio->fs, "");
+    if(!path)
+    {
+        out[0] = '\0';
+        return true;
+    }
+
+    strncpy(out, path, outcap - 1);
+    out[outcap - 1] = '\0';
+    return true;
+}
+
+static bool remoting_metadata(void* userdata, const char* key, char* out, size_t outcap, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(out && outcap) out[0] = '\0';
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "metadata not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!key || !key[0])
+    {
+        if(err && errcap) { strncpy(err, "missing key", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out || outcap == 0)
+    {
+        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script = tic_get_script(studio->tic);
+    const char* comment = script ? script->singleComment : NULL;
+    const char* value = tic_tool_metatag(studio->tic->cart.code.data, key, comment);
+    if(value == NULL || value[0] == '\0')
+        value = tic_tool_metatag(studio->tic->cart.code.data, key, NULL);
+
+    strncpy(out, value ? value : "", outcap - 1);
+    out[outcap - 1] = '\0';
+    return true;
+}
+#endif
 
 void fadePalette(tic_palette* pal, s32 value)
 {
@@ -1508,11 +1789,24 @@ static void updateMDate(Studio* studio)
 
 static void updateTitle(Studio* studio)
 {
-    char name[TICNAME_MAX] = TIC_TITLE;
+    char name[TICNAME_MAX] = TIC_NAME;
 
 #if defined(BUILD_EDITORS)
     if(strlen(studio->console->rom.name))
-        snprintf(name, TICNAME_MAX, "%s [%s]", TIC_TITLE, studio->console->rom.name);
+        snprintf(name, TICNAME_MAX, "%s [%s]", TIC_NAME, studio->console->rom.name);
+
+    if(studio->remoting)
+    {
+        char extra[256];
+        ticbuild_remoting_get_title_info(studio->remoting, extra, sizeof extra);
+        if(extra[0])
+        {
+            char full[TICNAME_MAX];
+            snprintf(full, TICNAME_MAX, "%s | %s", name, extra);
+            strncpy(name, full, TICNAME_MAX - 1);
+            name[TICNAME_MAX - 1] = '\0';
+        }
+    }
 #endif
 
     tic_sys_title(name);
@@ -2442,6 +2736,11 @@ void studio_tick(Studio* studio, tic80_input input)
     tic->ram->input = input;
 
 #if defined(BUILD_EDITORS)
+    if(studio->remoting)
+    {
+        ticbuild_remoting_tick(studio->remoting);
+    }
+
     processAnim(studio->anim.movie, studio);
     checkChanges(studio);
     tic_net_start(studio->net);
@@ -2483,6 +2782,28 @@ void studio_tick(Studio* studio, tic80_input input)
         callback[studio->mode].data
             ? tic_core_blit_ex(tic, callback[studio->mode])
             : tic_core_blit(tic);
+
+#if defined(BUILD_EDITORS)
+        if(studio->remoting)
+        {
+            uint32_t tic_ms10 = 0, scn_ms10 = 0, bdr_ms10 = 0, tot_ms10 = 0;
+
+            // Finalize timing for the frame that was just rendered.
+            // Only meaningful in RUN mode; otherwise avoid showing stale values.
+            if(studio->mode == TIC_RUN_MODE)
+            {
+                ticbuild_user_timing_end_frame(tic);
+                ticbuild_user_timing_get_last_ms10(tic, &tic_ms10, &scn_ms10, &bdr_ms10, &tot_ms10);
+            }
+
+            ticbuild_remoting_set_user_time_ms10(studio->remoting, tic_ms10, scn_ms10, bdr_ms10, tot_ms10);
+            ticbuild_remoting_on_frame(studio->remoting, tic_sys_counter_get(), tic_sys_freq_get());
+
+            if(ticbuild_remoting_take_title_dirty(studio->remoting)) {
+                updateTitle(studio);
+            }
+        }
+#endif
 
         blitCursor(studio);
 
@@ -2596,6 +2917,12 @@ void studio_delete(Studio* studio)
 {
     {
 #if defined(BUILD_EDITORS)
+        if(studio->remoting)
+        {
+            ticbuild_remoting_close(studio->remoting);
+            studio->remoting = NULL;
+        }
+
         for(s32 i = 0; i < TIC_EDITOR_BANKS; i++)
         {
             freeSprite  (studio->banks.sprite[i]);
@@ -2652,6 +2979,7 @@ static StartArgs parseArgs(s32 argc, char **argv)
 
     StartArgs args = {0};
     args.volume = -1;
+    args.remotingPort = 0;
 
 #if defined(BUILD_EDITORS)
     args.lowerlimit = 256;
@@ -2666,6 +2994,9 @@ static StartArgs parseArgs(s32 argc, char **argv)
         CMD_PARAMS_LIST(CMD_PARAMS_DEF)
 #undef  CMD_PARAMS_DEF
 #if defined(BUILD_EDITORS)
+
+        OPT_INTEGER('\0', "remoting-port", &args.remotingPort, "listen on 127.0.0.1:<port> for ticbuild remoting"),
+
         OPT_GROUP("Byte battle options:\n"),
         OPT_STRING('\0',    "codeexport",    &args.codeexport,   "export code to filename"),
         OPT_STRING('\0',    "codeimport",    &args.codeimport,   "import code from filename"),
@@ -2804,6 +3135,9 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .samplerate = samplerate,
         .net = tic_net_create(TIC_WEBSITE),
 
+        .remoting = NULL,
+        .remotingPort = 0,
+
         .bytebattle = {0},
 #endif
         .tic = tic_core_create(samplerate, format),
@@ -2881,6 +3215,32 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
 
 #if defined(BUILD_EDITORS)
     initConsole(studio->console, studio, studio->fs, studio->net, studio->config, args);
+
+    if(args.remotingPort > 0)
+    {
+        studio->remotingPort = args.remotingPort;
+
+        ticbuild_remoting_callbacks cb =
+        {
+            .userdata = studio,
+            .hello = remoting_hello,
+            .load = remoting_load,
+            .restart = remoting_restart,
+            .quit = remoting_quit,
+            .sync = remoting_sync,
+            .poke = remoting_poke,
+            .peek = remoting_peek,
+            .eval = remoting_eval,
+            .eval_expr = remoting_eval_expr,
+            .list_globals = remoting_list_globals,
+            .cart_path = remoting_cart_path,
+            .fs_path = remoting_fs_path,
+            .metadata = remoting_metadata,
+        };
+
+        studio->remoting = ticbuild_remoting_create(studio->remotingPort, &cb);
+    }
+
     initSurfMode(studio);
     initModules(studio);
 #endif

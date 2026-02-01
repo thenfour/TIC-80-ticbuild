@@ -27,6 +27,12 @@ if(BUILD_EDITORS)
         ${TIC80LIB_DIR}/studio/editors/sfx.c
         ${TIC80LIB_DIR}/studio/editors/music.c
         ${TIC80LIB_DIR}/studio/net.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/fps.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/user_timing.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/remoting.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/discovery.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/lua_eval.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/lua_serialize.c
         ${TIC80LIB_DIR}/ext/history.c
         ${TIC80LIB_DIR}/ext/gif.c
     )
@@ -49,6 +55,10 @@ target_include_directories(tic80studio
 )
 
 target_link_libraries(tic80studio PUBLIC tic80core PRIVATE zip wave_writer argparse giflib png)
+
+if(BUILD_WITH_LUA OR BUILD_WITH_MOON OR BUILD_WITH_YUE OR BUILD_WITH_FENNEL)
+    target_link_libraries(tic80studio PRIVATE luaapi)
+endif()
 
 if(USE_NAETT)
     target_compile_definitions(tic80studio PRIVATE USE_NAETT)
