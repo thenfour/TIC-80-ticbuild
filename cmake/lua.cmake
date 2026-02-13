@@ -14,6 +14,9 @@ if(BUILD_WITH_LUA AND PREFER_SYSTEM_LIBRARIES)
             ${CMAKE_SOURCE_DIR}/src/api/parse_note.c
         )
         target_link_libraries(luaapi PRIVATE runtime ${lua_LIBRARY})
+        if(BUILD_EDITORS)
+            target_compile_definitions(luaapi PUBLIC BUILD_EDITORS)
+        endif()
         target_include_directories(luaapi PUBLIC
             ${lua_INCLUDE_DIR}
             ${CMAKE_SOURCE_DIR}/include
@@ -75,6 +78,9 @@ if(BUILD_WITH_LUA OR BUILD_WITH_MOON OR BUILD_WITH_YUE OR BUILD_WITH_FENNEL)
     target_link_libraries(luaapi PRIVATE runtime)
 
     target_compile_definitions(luaapi PRIVATE LUA_COMPAT_5_2)
+    if(BUILD_EDITORS)
+        target_compile_definitions(luaapi PUBLIC BUILD_EDITORS)
+    endif()
 
     target_include_directories(luaapi
         PUBLIC ${THIRDPARTY_DIR}/lua

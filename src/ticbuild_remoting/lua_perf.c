@@ -162,10 +162,14 @@ void ticbuild_lua_perf_install(tic_mem* tic)
             return;
     }
 
+    bool vm_changed = (slot->lua != lua);
+
     slot->lua = lua;
     slot->instr_counter = 0;
     slot->prev_count_accum = 0;
-    tb_init_user_slots(slot);
+
+    if(vm_changed)
+        tb_init_user_slots(slot);
 
     slot->prev_hook = lua_gethook(lua);
     slot->prev_mask = lua_gethookmask(lua);
