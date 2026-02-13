@@ -104,6 +104,11 @@ static int tb_clamp_int(int value, int min_value, int max_value)
     return value;
 }
 
+static int tb_abs_int(int value)
+{
+    return value < 0 ? -value : value;
+}
+
 static int tb_luma(const tic_rgb* c)
 {
     return c ? (c->r * 3 + c->g * 4 + c->b * 1) : 0;
@@ -236,7 +241,41 @@ static double tb_graph_sample(const tb_perf_hud_state* state, int metric, uint32
     return state->graph_values[metric][idx];
 }
 
-static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metric, s32 x, s32 y, u8 graph_color)
+static void tb_draw_line(tic_mem* tic, s32 x0, s32 y0, s32 x1, s32 y1, u8 color)
+{
+    s32 dx = tb_abs_int(x1 - x0);
+    s32 sx = x0 < x1 ? 1 : -1;
+    s32 dy = -tb_abs_int(y1 - y0);
+    s32 sy = y0 < y1 ? 1 : -1;
+    s32 err = dx + dy;
+
+    while(true)
+    {
+        tb_poke4_safe(tic, x0, y0, color);
+        if(x0 == x1 && y0 == y1)
+            break;
+
+        s32 e2 = err * 2;
+        if(e2 >= dy)
+        {
+            err += dy;
+            x0 += sx;
+        }
+        if(e2 <= dx)
+        {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+static void tb_draw_line_shadow(tic_mem* tic, s32 x0, s32 y0, s32 x1, s32 y1, u8 line_color, u8 shadow_color)
+{
+    tb_draw_line(tic, x0, y0 + 1, x1, y1 + 1, shadow_color);
+    tb_draw_line(tic, x0, y0, x1, y1, line_color);
+}
+
+static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metric, s32 x, s32 y, u8 graph_color, u8 shadow_color)
 {
     if(!tic || !state) return;
 
@@ -252,6 +291,7 @@ static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metr
         peak = TB_PERF_MIN_PEAK;
 
     int prev_y = -1;
+    int prev_x = -1;
     for(s32 i = 0; i < width; i++)
     {
         uint32_t start = (uint32_t)((uint64_t)i * count / (uint32_t)width);
@@ -289,29 +329,25 @@ static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metr
         if(end > start)
         {
             for(s32 py = y_max; py <= y_min; py++)
+                tb_poke4_safe(tic, px, py + 1, shadow_color);
+            for(s32 py = y_max; py <= y_min; py++)
                 tb_poke4_safe(tic, px, py, graph_color);
             prev_y = -1;
+            prev_x = -1;
         }
         else
         {
-            if(prev_y >= 0)
+            if(prev_y >= 0 && prev_x >= 0)
             {
-                s32 y0 = prev_y;
-                s32 y1 = y_max;
-                if(y0 > y1)
-                {
-                    s32 tmp = y0;
-                    y0 = y1;
-                    y1 = tmp;
-                }
-                for(s32 py = y0; py <= y1; py++)
-                    tb_poke4_safe(tic, px, py, graph_color);
+                tb_draw_line_shadow(tic, prev_x, prev_y, px, y_max, graph_color, shadow_color);
             }
             else
             {
+                tb_poke4_safe(tic, px, y_max + 1, shadow_color);
                 tb_poke4_safe(tic, px, y_max, graph_color);
             }
             prev_y = y_max;
+            prev_x = px;
         }
     }
 }
@@ -478,21 +514,8 @@ void ticbuild_perf_hud_draw(
         TB_METRIC_CUSTOM3,
     };
 
-    const int metrics_min[] =
-    {
-        TB_METRIC_FPS,
-        TB_METRIC_MEM,
-        TB_METRIC_TIC,
-        TB_METRIC_SCN_BDR,
-    };
-
     const int* metric_list = metrics_full;
     size_t metric_count = COUNT_OF(metrics_full);
-    if(mode == TB_PERF_HUD_MINIMAL)
-    {
-        metric_list = metrics_min;
-        metric_count = COUNT_OF(metrics_min);
-    }
 
     const char* labels[TB_PERF_METRIC_COUNT] =
     {
@@ -514,6 +537,7 @@ void ticbuild_perf_hud_draw(
         tb_format_u64(value_buf[idx], sizeof value_buf[idx], value);
     }
 
+    bool draw_graphs = (mode == TB_PERF_HUD_FULL);
     s32 graph_x = 0;
     s32 graph_y = 0;
     s32 value_x = graph_x + graph_width + TB_PERF_GRAPH_GAP;
@@ -527,7 +551,8 @@ void ticbuild_perf_hud_draw(
         s32 row_y = graph_y + (s32)row * graph_height;
         s32 text_y = row_y + text_offset;
 
-        tb_draw_graph(tic, state, metric, graph_x, row_y, graph_mapped);
+        if(draw_graphs)
+            tb_draw_graph(tic, state, metric, graph_x, row_y, graph_mapped, outline_mapped);
 
         char padded_value[32];
         tb_pad_left(padded_value, sizeof padded_value, value_buf[metric], TB_PERF_VALUE_WIDTH_CHARS);
