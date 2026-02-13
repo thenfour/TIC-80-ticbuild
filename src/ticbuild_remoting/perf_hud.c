@@ -34,47 +34,44 @@ void ticbuild_perf_hud_draw(
     ticbuild_user_timing_get_last_cycles(tic, &tic_cycles, &scn_cycles, &bdr_cycles);
     lua_mem_bytes = ticbuild_lua_perf_get_mem_bytes(tic);
 
-    char ticbuf[32], scnbuf[32], bdrbuf[32], totbuf[32], luabuf[32];
+    char ticbuf[32], scnbuf[32], bdrbuf[32], luabuf[32];
     tb_format_ms10(ticbuf, sizeof ticbuf, tic_ms10);
     tb_format_ms10(scnbuf, sizeof scnbuf, scn_ms10);
     tb_format_ms10(bdrbuf, sizeof bdrbuf, bdr_ms10);
-    tb_format_ms10(totbuf, sizeof totbuf, tot_ms10);
     tb_format_kb1(luabuf, sizeof luabuf, lua_mem_bytes);
 
     char line0[64];
-    char line1[128];
-    char line2[128];
+    char line1[64];
+    char line2[64];
     char line3[64];
+    char line4[64];
+    char line5[64];
+    char line6[64];
+    char line7[64];
 
     snprintf(line0, sizeof line0, "FPS: %d", fps_val);
-    snprintf(line1, sizeof line1, "TIC %s SCN %s BDR %s TOT %s", ticbuf, scnbuf, bdrbuf, totbuf);
-    snprintf(line2, sizeof line2, "VM TIC %llu SCN %llu BDR %llu",
-        (unsigned long long)tic_cycles,
-        (unsigned long long)scn_cycles,
-        (unsigned long long)bdr_cycles);
-    snprintf(line3, sizeof line3, "Mem %sKB", luabuf);
+    snprintf(line1, sizeof line1, "Mem %sKB", luabuf);
+    snprintf(line2, sizeof line2, "TIC %s", ticbuf);
+    snprintf(line3, sizeof line3, "SCN %s", scnbuf);
+    snprintf(line4, sizeof line4, "BDR %s", bdrbuf);
+    snprintf(line5, sizeof line5, "VM TIC %llu", (unsigned long long)tic_cycles);
+    snprintf(line6, sizeof line6, "VM SCN %llu", (unsigned long long)scn_cycles);
+    snprintf(line7, sizeof line7, "VM BDR %llu", (unsigned long long)bdr_cycles);
 
-    const char* lines[] = {line0, line1, line2, line3};
+    const char* lines[] = {line0, line1, line2, line3, line4, line5, line6, line7};
     const size_t line_count = COUNT_OF(lines);
-    size_t maxlen = 0;
-    for(size_t i = 0; i < line_count; i++)
-    {
-        size_t len = strlen(lines[i]);
-        if(len > maxlen) maxlen = len;
-    }
 
     enum {Padding = 2, LineHeight = TIC_FONT_HEIGHT + 1};
-    s32 w = (s32)(maxlen * TIC_FONT_WIDTH + Padding * 2);
-    s32 h = (s32)(line_count * LineHeight + Padding * 2);
     s32 x = 2;
     s32 y = 2;
-
-    tic_api_rect(tic, x - 1, y - 1, w + 2, h + 2, tic_color_dark_grey);
-    tic_api_rect(tic, x, y, w, h, tic_color_black);
 
     for(size_t i = 0; i < line_count; i++)
     {
         s32 ty = y + Padding + (s32)i * LineHeight;
+        // tic_api_print(tic, lines[i], x + Padding + 1, ty + 1, tic_color_black, true, 1, true);
+        // tic_api_print(tic, lines[i], x + Padding - 1, ty - 1, tic_color_black, true, 1, true);
+        // tic_api_print(tic, lines[i], x + Padding + 1, ty - 1, tic_color_black, true, 1, true);
+        // tic_api_print(tic, lines[i], x + Padding - 1, ty + 1, tic_color_black, true, 1, true);
         tic_api_print(tic, lines[i], x + Padding, ty, tic_color_white, true, 1, true);
     }
 }
