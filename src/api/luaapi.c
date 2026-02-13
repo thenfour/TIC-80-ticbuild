@@ -1615,33 +1615,69 @@ static int lua_loadfile(lua_State *lua)
 
 static int lua_perf_tick(lua_State* lua)
 {
-    if(lua_gettop(lua) != 0)
-        luaL_error(lua, "invalid parameters, perf_tick()\n");
+    int top = lua_gettop(lua);
+    if(top < 2 || top > 4)
+        luaL_error(lua, "invalid parameters, perf_tick(slot, value, label, smoothing_alpha)\n");
+
+    if(!lua_isnumber(lua, 1) || !lua_isnumber(lua, 2))
+        luaL_error(lua, "invalid parameters, perf_tick(slot, value, label, smoothing_alpha)\n");
+
+    int slot = (int)lua_tointeger(lua, 1);
+    double value = lua_tonumber(lua, 2);
+
+    const char* label = NULL;
+    bool set_label = false;
+    if(top >= 3 && !lua_isnil(lua, 3))
+    {
+        if(!lua_isstring(lua, 3))
+            luaL_error(lua, "invalid parameters, perf_tick(slot, value, label, smoothing_alpha)\n");
+        label = lua_tostring(lua, 3);
+        set_label = true;
+    }
+
+    double alpha = 0.0;
+    bool set_alpha = false;
+    if(top >= 4 && !lua_isnil(lua, 4))
+    {
+        if(!lua_isnumber(lua, 4))
+            luaL_error(lua, "invalid parameters, perf_tick(slot, value, label, smoothing_alpha)\n");
+        alpha = lua_tonumber(lua, 4);
+        set_alpha = true;
+    }
 
     tic_core* core = getLuaCore(lua);
     tic_mem* tic = (tic_mem*)core;
 
 #if defined(BUILD_EDITORS)
-    ticbuild_lua_perf_install(tic);
-    lua_pushinteger(lua, (lua_Integer)ticbuild_lua_perf_get_counter(tic));
-    return 1;
+    if(!ticbuild_lua_perf_set_user_slot(tic, slot, value, label, set_label, alpha, set_alpha))
+        luaL_error(lua, "invalid parameters, perf_tick(slot, value, label, smoothing_alpha)\n");
 #else
-    lua_pushinteger(lua, 0);
-    return 1;
+    (void)slot;
+    (void)value;
+    (void)label;
+    (void)set_label;
+    (void)alpha;
+    (void)set_alpha;
 #endif
+
+    return 0;
 }
 
 static int lua_perf_clear(lua_State* lua)
 {
-    if(lua_gettop(lua) != 0)
-        luaL_error(lua, "invalid parameters, perf_clear()\n");
+    if(lua_gettop(lua) != 1 || !lua_isnumber(lua, 1))
+        luaL_error(lua, "invalid parameters, perf_clear(slot)\n");
+
+    int slot = (int)lua_tointeger(lua, 1);
 
     tic_core* core = getLuaCore(lua);
     tic_mem* tic = (tic_mem*)core;
 
 #if defined(BUILD_EDITORS)
-    ticbuild_lua_perf_install(tic);
-    ticbuild_lua_perf_reset_counter(tic);
+    if(!ticbuild_lua_perf_clear_user_slot(tic, slot))
+        luaL_error(lua, "invalid parameters, perf_clear(slot)\n");
+#else
+    (void)slot;
 #endif
 
     return 0;

@@ -16,11 +16,15 @@ enum
     TB_PERF_VALUE_GAP = 2,
     TB_PERF_VALUE_WIDTH_CHARS = 6,
     TB_PERF_DISPLAY_HZ = 5,
+    TB_PERF_GRAPH_RANGE_ADJUST = 1,
+    TB_PERF_LABEL_MAX = 31,
 };
 
 enum
 {
     TB_PERF_SAMPLE_MIN = 1,
+    TB_PERF_CUSTOM_SLOTS = 4,
+    TB_PERF_BUILTIN_METRICS = 4,
 };
 
 static const double TB_PERF_KB_DIV = 1024.0;
@@ -28,6 +32,11 @@ static const double TB_PERF_KC_DIV = 1000.0;
 static const double TB_PERF_PEAK_DECAY = 0.98;
 static const double TB_PERF_MIN_PEAK = 1.0;
 static const double TB_PERF_ROUND_EPS = 0.5;
+static const double TB_PERF_ALPHA_FPS = 0.2;
+static const double TB_PERF_ALPHA_MEM = 0.2;
+static const double TB_PERF_ALPHA_DEFAULT = 0.25;
+static const double TB_PERF_ALPHA_MIN = 0.0;
+static const double TB_PERF_ALPHA_MAX = 1.0;
 
 enum
 {
@@ -98,6 +107,13 @@ static void tb_pad_left(char* out, size_t cap, const char* value, size_t width)
 }
 
 static int tb_clamp_int(int value, int min_value, int max_value)
+{
+    if(value < min_value) return min_value;
+    if(value > max_value) return max_value;
+    return value;
+}
+
+static double tb_clamp_double(double value, double min_value, double max_value)
 {
     if(value < min_value) return min_value;
     if(value > max_value) return max_value;
@@ -296,7 +312,7 @@ static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metr
     {
         uint32_t start = (uint32_t)((uint64_t)i * count / (uint32_t)width);
         uint32_t end = (uint32_t)((uint64_t)(i + 1) * count / (uint32_t)width);
-        if(end > 0) end -= 1; // make end inclusive
+        if(end > 0) end -= TB_PERF_GRAPH_RANGE_ADJUST; // make end inclusive
         if(end < start) end = start;
 
         double vmin = tb_graph_sample(state, metric, start);
@@ -409,7 +425,7 @@ void ticbuild_perf_hud_draw(
     raw[TB_METRIC_CUSTOM2] = (double)metrics->custom[2];
     raw[TB_METRIC_CUSTOM3] = (double)metrics->custom[3];
 
-    static const double alphas[TB_PERF_METRIC_COUNT] =
+    double alphas[TB_PERF_METRIC_COUNT] =
     {
         0.2, // FPS
         0.2, // MEM
@@ -420,6 +436,12 @@ void ticbuild_perf_hud_draw(
         0.25, // CUSTOM2
         0.25, // CUSTOM3
     };
+
+    for(int i = 0; i < TB_PERF_CUSTOM_SLOTS; i++)
+    {
+        int metric = TB_METRIC_CUSTOM0 + i;
+        alphas[metric] = tb_clamp_double(metrics->custom_alpha[i], TB_PERF_ALPHA_MIN, TB_PERF_ALPHA_MAX);
+    }
 
     for(int i = 0; i < TB_PERF_METRIC_COUNT; i++)
     {
@@ -508,26 +530,40 @@ void ticbuild_perf_hud_draw(
         TB_METRIC_MEM,
         TB_METRIC_TIC,
         TB_METRIC_SCN_BDR,
-        TB_METRIC_CUSTOM0,
-        TB_METRIC_CUSTOM1,
-        TB_METRIC_CUSTOM2,
-        TB_METRIC_CUSTOM3,
     };
 
-    const int* metric_list = metrics_full;
-    size_t metric_count = COUNT_OF(metrics_full);
+    int metric_list[TB_PERF_METRIC_COUNT];
+    size_t metric_count = 0;
+    for(size_t i = 0; i < COUNT_OF(metrics_full); i++)
+        metric_list[metric_count++] = metrics_full[i];
 
-    const char* labels[TB_PERF_METRIC_COUNT] =
+    for(int i = 0; i < TB_PERF_CUSTOM_SLOTS; i++)
+    {
+        if(metrics->custom_active[i])
+            metric_list[metric_count++] = TB_METRIC_CUSTOM0 + i;
+    }
+
+    const char* labels_builtin[TB_PERF_BUILTIN_METRICS] =
     {
         "FPS",
         "MEM",
         "TIC",
         "SCN",
-        "USR1",
-        "USR2",
-        "USR3",
-        "USR4",
     };
+
+    char labels_custom[TB_PERF_CUSTOM_SLOTS][TB_PERF_LABEL_MAX + 1];
+    for(int i = 0; i < TB_PERF_CUSTOM_SLOTS; i++)
+    {
+        if(metrics->custom_label[i][0])
+        {
+            strncpy(labels_custom[i], metrics->custom_label[i], TB_PERF_LABEL_MAX);
+            labels_custom[i][TB_PERF_LABEL_MAX] = '\0';
+        }
+        else
+        {
+            snprintf(labels_custom[i], sizeof labels_custom[i], "USR%d", i + 1);
+        }
+    }
 
     char value_buf[TB_PERF_METRIC_COUNT][32];
     for(size_t i = 0; i < metric_count; i++)
@@ -559,7 +595,11 @@ void ticbuild_perf_hud_draw(
         tb_print_outline(tic, padded_value, value_x, text_y, outline_mapped);
         tic_api_print(tic, padded_value, value_x, text_y, (u8)text_color, true, 1, true);
 
-        tb_print_outline(tic, labels[metric], label_x, text_y, outline_mapped);
-        tic_api_print(tic, labels[metric], label_x, text_y, (u8)text_color, true, 1, true);
+        const char* label = metric < TB_PERF_BUILTIN_METRICS
+            ? labels_builtin[metric]
+            : labels_custom[metric - TB_METRIC_CUSTOM0];
+
+        tb_print_outline(tic, label, label_x, text_y, outline_mapped);
+        tic_api_print(tic, label, label_x, text_y, (u8)text_color, true, 1, true);
     }
 }

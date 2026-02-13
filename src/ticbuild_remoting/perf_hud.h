@@ -22,8 +22,8 @@ extern "C"
     typedef enum
     {
         TB_PERF_HUD_OFF = 0,
-        TB_PERF_HUD_MINIMAL,
         TB_PERF_HUD_FULL,
+        TB_PERF_HUD_MINIMAL,
     } tb_perf_hud_mode;
 
     typedef struct
@@ -32,7 +32,10 @@ extern "C"
         uint64_t scn_cycles;
         uint64_t bdr_cycles;
         uint64_t lua_mem_bytes;
-        uint64_t custom[4];
+        double custom[4];
+        bool custom_active[4];
+        double custom_alpha[4];
+        char custom_label[4][32];
     } tb_perf_metrics;
 
     typedef struct

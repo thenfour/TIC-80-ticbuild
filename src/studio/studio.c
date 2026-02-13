@@ -2525,7 +2525,17 @@ static void renderStudio(Studio* studio)
         ticbuild_user_timing_end_frame(tic);
         ticbuild_user_timing_get_last_cycles(tic, &studio->perfFrame.tic_cycles, &studio->perfFrame.scn_cycles, &studio->perfFrame.bdr_cycles);
         studio->perfFrame.lua_mem_bytes = ticbuild_lua_perf_get_mem_bytes(tic);
-        memset(studio->perfFrame.custom, 0, sizeof studio->perfFrame.custom);
+
+        tb_lua_perf_user_slot user_slots[TB_LUA_PERF_USER_SLOT_COUNT];
+        ticbuild_lua_perf_get_user_slots(tic, user_slots);
+        for(int i = 0; i < TB_LUA_PERF_USER_SLOT_COUNT; i++)
+        {
+            studio->perfFrame.custom[i] = user_slots[i].value;
+            studio->perfFrame.custom_active[i] = user_slots[i].active;
+            studio->perfFrame.custom_alpha[i] = user_slots[i].smoothing_alpha;
+            strncpy(studio->perfFrame.custom_label[i], user_slots[i].label, sizeof studio->perfFrame.custom_label[i] - 1);
+            studio->perfFrame.custom_label[i][sizeof studio->perfFrame.custom_label[i] - 1] = '\0';
+        }
     }
     else
     {
