@@ -233,8 +233,9 @@ struct Studio
     TicbuildRemoting* remoting;
     s32 remotingPort;
 
-    bool perfHud;
-    tb_fps_tracker perfHudFps;
+    tb_perf_hud_state perfHud;
+    tb_perf_hud_mode perfHudMode;
+    tb_perf_metrics perfFrame;
 
     Bytebattle bytebattle;
 
@@ -2175,8 +2176,25 @@ static void processShortcuts(Studio* studio)
 #if defined(BUILD_EDITORS)
         if(keyWasPressedOnce(studio, tic_key_0))
         {
-            studio->perfHud = !studio->perfHud;
-            showPopupMessage(studio, studio->perfHud ? "PERF HUD ON" : "PERF HUD OFF");
+            studio->perfHudMode = (tb_perf_hud_mode)((studio->perfHudMode + 1) % 3);
+            const char* label = "PERF HUD OFF";
+            if(studio->perfHudMode == TB_PERF_HUD_FULL) label = "PERF HUD FULL";
+            else if(studio->perfHudMode == TB_PERF_HUD_MINIMAL) label = "PERF HUD MIN";
+            showPopupMessage(studio, label);
+        }
+        else if(keyWasPressedOnce(studio, tic_key_8))
+        {
+            ticbuild_perf_hud_adjust_graph_speed(&studio->perfHud, -1);
+            char buf[64];
+            snprintf(buf, sizeof buf, "PERF GRAPH SPEED %d", ticbuild_perf_hud_get_graph_speed(&studio->perfHud));
+            showPopupMessage(studio, buf);
+        }
+        else if(keyWasPressedOnce(studio, tic_key_9))
+        {
+            ticbuild_perf_hud_adjust_graph_speed(&studio->perfHud, 1);
+            char buf[64];
+            snprintf(buf, sizeof buf, "PERF GRAPH SPEED %d", ticbuild_perf_hud_get_graph_speed(&studio->perfHud));
+            showPopupMessage(studio, buf);
         }
 #endif
         if (enterWasPressedOnce(studio)) gotoFullscreen(studio);
@@ -2500,12 +2518,24 @@ static void renderStudio(Studio* studio)
     }
 
 #if defined(BUILD_EDITORS)
+    if(studio->mode == TIC_RUN_MODE)
+    {
+        ticbuild_user_timing_end_frame(tic);
+        ticbuild_user_timing_get_last_cycles(tic, &studio->perfFrame.tic_cycles, &studio->perfFrame.scn_cycles, &studio->perfFrame.bdr_cycles);
+        studio->perfFrame.lua_mem_bytes = ticbuild_lua_perf_get_mem_bytes(tic);
+    }
+    else
+    {
+        memset(&studio->perfFrame, 0, sizeof studio->perfFrame);
+    }
+
     ticbuild_perf_hud_draw(
         tic,
-        &studio->perfHudFps,
+        &studio->perfHud,
+        &studio->perfFrame,
         tic_sys_counter_get(),
         tic_sys_freq_get(),
-        studio->perfHud,
+        studio->perfHudMode,
         studio->mode == TIC_RUN_MODE);
 #endif
 
@@ -2808,22 +2838,12 @@ void studio_tick(Studio* studio, tic80_input input)
 #if defined(BUILD_EDITORS)
         if(studio->remoting)
         {
-            uint32_t tic_ms10 = 0, scn_ms10 = 0, bdr_ms10 = 0, tot_ms10 = 0;
-            uint64_t tic_cycles = 0, scn_cycles = 0, bdr_cycles = 0;
-            uint64_t lua_mem_bytes = 0;
-
-            // Finalize timing for the frame that was just rendered.
-            // Only meaningful in RUN mode; otherwise avoid showing stale values.
-            if(studio->mode == TIC_RUN_MODE)
-            {
-                ticbuild_user_timing_end_frame(tic);
-                ticbuild_user_timing_get_last_ms10(tic, &tic_ms10, &scn_ms10, &bdr_ms10, &tot_ms10);
-                ticbuild_user_timing_get_last_cycles(tic, &tic_cycles, &scn_cycles, &bdr_cycles);
-                lua_mem_bytes = ticbuild_lua_perf_get_mem_bytes(tic);
-            }
-
-            ticbuild_remoting_set_user_time_ms10(studio->remoting, tic_ms10, scn_ms10, bdr_ms10, tot_ms10);
-            ticbuild_remoting_set_lua_perf(studio->remoting, tic_cycles, scn_cycles, bdr_cycles, lua_mem_bytes);
+            ticbuild_remoting_set_lua_perf(
+                studio->remoting,
+                studio->perfFrame.tic_cycles,
+                studio->perfFrame.scn_cycles,
+                studio->perfFrame.bdr_cycles,
+                studio->perfFrame.lua_mem_bytes);
             ticbuild_remoting_on_frame(studio->remoting, tic_sys_counter_get(), tic_sys_freq_get());
 
             if(ticbuild_remoting_take_title_dirty(studio->remoting)) {
@@ -3008,6 +3028,9 @@ static StartArgs parseArgs(s32 argc, char **argv)
     args.volume = -1;
     args.remotingPort = 0;
     args.globalDiscoEnabled = true;
+    args.hudPaletteText = -1;
+    args.hudPaletteOutline = -1;
+    args.hudPaletteGraph = -1;
 
 #if defined(BUILD_EDITORS)
     args.lowerlimit = 256;
@@ -3026,6 +3049,9 @@ static StartArgs parseArgs(s32 argc, char **argv)
         OPT_INTEGER('\0', "remoting-port", &args.remotingPort, "listen on 127.0.0.1:<port> for ticbuild remoting"),
         OPT_STRING('\0', "remote-session-location", &args.remoteSessionLocation, "directory to write remoting discovery file"),
         OPT_STRING('\0', "global-disco", &args.globalDisco, "enable or disable global discovery file (ON|OFF)"),
+    OPT_INTEGER('\0', "hud-palette-text", &args.hudPaletteText, "perf HUD text palette index (0-15)"),
+    OPT_INTEGER('\0', "hud-palette-outline", &args.hudPaletteOutline, "perf HUD outline palette index (0-15)"),
+    OPT_INTEGER('\0', "hud-palette-graph", &args.hudPaletteGraph, "perf HUD graph palette index (0-15)"),
 
         OPT_GROUP("Byte battle options:\n"),
         OPT_STRING('\0',    "codeexport",    &args.codeexport,   "export code to filename"),
@@ -3177,7 +3203,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .remoting = NULL,
         .remotingPort = 0,
 
-        .perfHud = false,
+        .perfHudMode = TB_PERF_HUD_OFF,
 
         .bytebattle = {0},
 #endif
@@ -3185,7 +3211,12 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
     };
 
 #if defined(BUILD_EDITORS)
-    tb_fps_init(&studio->perfHudFps);
+    ticbuild_perf_hud_init(&studio->perfHud);
+    ticbuild_perf_hud_set_palette_override(
+        &studio->perfHud,
+        args.hudPaletteText,
+        args.hudPaletteOutline,
+        args.hudPaletteGraph);
 #endif
 
     {

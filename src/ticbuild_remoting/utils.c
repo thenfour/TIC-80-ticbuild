@@ -26,6 +26,14 @@ void tb_format_kb1(char* out, size_t cap, uint64_t bytes)
     snprintf(out, cap, "%llu.%llu", whole, frac);
 }
 
+void tb_format_kc1(char* out, size_t cap, uint64_t cycles)
+{
+    if(!out || cap == 0) return;
+    double kc = (double)cycles / 1000.0;
+    snprintf(out, cap, "%.1f", kc);
+    tb_trim_trailing_zeros(out);
+}
+
 void tb_trim_trailing_zeros(char* s)
 {
     if(!s) return;

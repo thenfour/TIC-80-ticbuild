@@ -105,3 +105,11 @@ int tb_fps_get(const tb_fps_tracker* t)
 {
     return t ? t->fps_rounded : 0;
 }
+
+double tb_fps_get_value(const tb_fps_tracker* t)
+{
+    if(!t || t->count == 0 || t->sum_dt == 0 || t->freq == 0)
+        return 0.0;
+
+    return ((double)t->count * (double)t->freq) / (double)t->sum_dt;
+}

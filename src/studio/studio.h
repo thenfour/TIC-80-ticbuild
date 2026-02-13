@@ -106,6 +106,9 @@ typedef struct
     const char *remoteSessionLocation;
     const char *globalDisco;
     bool globalDiscoEnabled;
+    s32 hudPaletteText;
+    s32 hudPaletteOutline;
+    s32 hudPaletteGraph;
 
 #if defined(BUILD_EDITORS)
     const char *codeexport;

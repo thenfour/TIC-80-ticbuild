@@ -28,6 +28,10 @@
 #include <lualib.h>
 #include <ctype.h>
 
+#if defined(BUILD_EDITORS)
+#include "ticbuild_remoting/lua_perf.h"
+#endif
+
 extern bool parse_note(const char* noteStr, s32* note, s32* octave);
 
 static inline s32 getLuaNumber(lua_State* lua, s32 index)
@@ -1609,6 +1613,40 @@ static int lua_loadfile(lua_State *lua)
     return 0;
 }
 
+static int lua_perf_tick(lua_State* lua)
+{
+    if(lua_gettop(lua) != 0)
+        luaL_error(lua, "invalid parameters, perf_tick()\n");
+
+    tic_core* core = getLuaCore(lua);
+    tic_mem* tic = (tic_mem*)core;
+
+#if defined(BUILD_EDITORS)
+    ticbuild_lua_perf_install(tic);
+    lua_pushinteger(lua, (lua_Integer)ticbuild_lua_perf_get_counter(tic));
+    return 1;
+#else
+    lua_pushinteger(lua, 0);
+    return 1;
+#endif
+}
+
+static int lua_perf_clear(lua_State* lua)
+{
+    if(lua_gettop(lua) != 0)
+        luaL_error(lua, "invalid parameters, perf_clear()\n");
+
+    tic_core* core = getLuaCore(lua);
+    tic_mem* tic = (tic_mem*)core;
+
+#if defined(BUILD_EDITORS)
+    ticbuild_lua_perf_install(tic);
+    ticbuild_lua_perf_reset_counter(tic);
+#endif
+
+    return 0;
+}
+
 void luaapi_open(lua_State *lua)
 {
     static const luaL_Reg loadedlibs[] =
@@ -1648,6 +1686,8 @@ void luaapi_init(tic_core* core)
 
     registerLuaFunction(core, lua_dofile, "dofile");
     registerLuaFunction(core, lua_loadfile, "loadfile");
+    registerLuaFunction(core, lua_perf_tick, "perf_tick");
+    registerLuaFunction(core, lua_perf_clear, "perf_clear");
 }
 
 void luaapi_close(tic_mem* tic)

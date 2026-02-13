@@ -46,6 +46,8 @@ extern "C"
 
     int tb_fps_get(const tb_fps_tracker* t);
 
+    double tb_fps_get_value(const tb_fps_tracker* t);
+
 #ifdef __cplusplus
 }
 #endif

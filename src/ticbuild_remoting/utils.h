@@ -42,6 +42,7 @@ extern "C"
     void tb_format_ms10(char* out, size_t cap, uint32_t ms10);
     void tb_format_ms10_value(char* out, size_t cap, uint32_t ms10);
     void tb_format_kb1(char* out, size_t cap, uint64_t bytes);
+    void tb_format_kc1(char* out, size_t cap, uint64_t cycles);
     void tb_trim_trailing_zeros(char* s);
     void tb_format_fps(char* out, size_t cap, const tb_fps_tracker* fps);
 

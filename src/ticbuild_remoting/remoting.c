@@ -186,21 +186,19 @@ void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, si
         listen_state = "remoting not listening";
     }
 
-    char ticbuf[32], scnbuf[32], bdrbuf[32], totbuf[32];
+    char ticbuf[32], scnbuf[32], totbuf[32];
     char luabuf[32];
-    tb_format_ms10(ticbuf, sizeof ticbuf, ctx->user_tic_ms10);
-    tb_format_ms10(scnbuf, sizeof scnbuf, ctx->user_scn_ms10);
-    tb_format_ms10(bdrbuf, sizeof bdrbuf, ctx->user_bdr_ms10);
-    tb_format_ms10(totbuf, sizeof totbuf, ctx->user_total_ms10);
+    uint64_t scn_bdr_cycles = ctx->user_scn_cycles + ctx->user_bdr_cycles;
+
+    tb_format_kc1(ticbuf, sizeof ticbuf, ctx->user_tic_cycles);
+    tb_format_kc1(scnbuf, sizeof scnbuf, scn_bdr_cycles);
+    tb_format_kc1(totbuf, sizeof totbuf, ctx->user_tic_cycles + scn_bdr_cycles);
     tb_format_kb1(luabuf, sizeof luabuf, ctx->lua_gc_mem_bytes);
 
     snprintf(out, outcap,
-        "FPS: %d | TIC %s SCN %s BDR %s TOT %s | VM TIC %llu SCN %llu BDR %llu | LUA %sKB | %s",
+        "FPS: %d | TIC %sk SCN+BDR %sk TOT %sk | LUA %sKB | %s",
         tb_fps_get(&ctx->fps),
-        ticbuf, scnbuf, bdrbuf, totbuf,
-        (unsigned long long)ctx->user_tic_cycles,
-        (unsigned long long)ctx->user_scn_cycles,
-        (unsigned long long)ctx->user_bdr_cycles,
+        ticbuf, scnbuf, totbuf,
         luabuf,
         listen_state);
 }
@@ -956,31 +954,18 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         }
 
         char fpsbuf[32];
-        char ticbuf[32];
-        char scnbuf[32];
-        char bdrbuf[32];
-
-        tb_format_fps(fpsbuf, sizeof fpsbuf, &ctx->fps);
-        tb_format_ms10_value(ticbuf, sizeof ticbuf, ctx->user_tic_ms10);
-        tb_format_ms10_value(scnbuf, sizeof scnbuf, ctx->user_scn_ms10);
-        tb_format_ms10_value(bdrbuf, sizeof bdrbuf, ctx->user_bdr_ms10);
-
         char data[512];
+        tb_format_fps(fpsbuf, sizeof fpsbuf, &ctx->fps);
+
         snprintf(data, sizeof data,
             "client_count=%d,"
             "fps=%s,"
-            "tic_ms=%s,"
-            "scn_ms=%s,"
-            "bdr_ms=%s,"
             "tic_cycles=%llu,"
             "scn_cycles=%llu,"
             "bdr_cycles=%llu,"
             "lua_gc_mem=%llu",
             ctx->client_count,
             fpsbuf,
-            ticbuf,
-            scnbuf,
-            bdrbuf,
             (unsigned long long)ctx->user_tic_cycles,
             (unsigned long long)ctx->user_scn_cycles,
             (unsigned long long)ctx->user_bdr_cycles,
