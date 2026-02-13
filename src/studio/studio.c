@@ -41,6 +41,8 @@
 #include "ext/history.h"
 #include "net.h"
 #include "ticbuild_remoting/remoting.h"
+#include "ticbuild_remoting/fps.h"
+#include "ticbuild_remoting/perf_hud.h"
 #include "ticbuild_remoting/user_timing.h"
 #include "ticbuild_remoting/lua_perf.h"
 #include "wave_writer.h"
@@ -230,6 +232,9 @@ struct Studio
 
     TicbuildRemoting* remoting;
     s32 remotingPort;
+
+    bool perfHud;
+    tb_fps_tracker perfHudFps;
 
     Bytebattle bytebattle;
 
@@ -1269,7 +1274,6 @@ Movie* resetMovie(Movie* movie)
 }
 
 #if defined(BUILD_EDITORS)
-
 static void drawPopup(Studio* studio)
 {
     if(studio->anim.movie != &studio->anim.idle)
@@ -2168,6 +2172,13 @@ static void processShortcuts(Studio* studio)
 
     if(alt)
     {
+#if defined(BUILD_EDITORS)
+        if(keyWasPressedOnce(studio, tic_key_0))
+        {
+            studio->perfHud = !studio->perfHud;
+            showPopupMessage(studio, studio->perfHud ? "PERF HUD ON" : "PERF HUD OFF");
+        }
+#endif
         if (enterWasPressedOnce(studio)) gotoFullscreen(studio);
 #if defined(BUILD_EDITORS)
         else if(studio->mode != TIC_RUN_MODE && studio->config->data.keyboardLayout != tic_layout_azerty)
@@ -2487,6 +2498,16 @@ static void renderStudio(Studio* studio)
 #endif
     default: break;
     }
+
+#if defined(BUILD_EDITORS)
+    ticbuild_perf_hud_draw(
+        tic,
+        &studio->perfHudFps,
+        tic_sys_counter_get(),
+        tic_sys_freq_get(),
+        studio->perfHud,
+        studio->mode == TIC_RUN_MODE);
+#endif
 
     tic_core_tick_end(tic);
 
@@ -3145,10 +3166,16 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .remoting = NULL,
         .remotingPort = 0,
 
+        .perfHud = false,
+
         .bytebattle = {0},
 #endif
         .tic = tic_core_create(samplerate, format),
     };
+
+#if defined(BUILD_EDITORS)
+    tb_fps_init(&studio->perfHudFps);
+#endif
 
     {
         const char *path = args.fs ? args.fs : folder;
