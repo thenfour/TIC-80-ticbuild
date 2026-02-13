@@ -5,7 +5,7 @@
 #include <lua.h>
 #include <string.h>
 
-enum { TB_LUA_HOOK_STEP = 250 };
+enum { TB_LUA_HOOK_STEP = 1000 };
 
 typedef struct
 {
