@@ -1,7 +1,5 @@
 #include "ticbuild_remoting/perf_hud.h"
 
-#include "ticbuild_remoting/utils.h"
-
 #include "tools.h"
 #include "tilesheet.h"
 
@@ -11,11 +9,36 @@
 
 enum
 {
-    TB_PERF_GRAPH_WIDTH = 188,
-    TB_PERF_GRAPH_HEIGHT = 15,
-    TB_PERF_GRAPH_X = 2,
-    TB_PERF_GRAPH_Y = 2,
     TB_PERF_GRAPH_SPEED_MAX = 8,
+    TB_PERF_GRAPH_SPEED_MIN = 1,
+    TB_PERF_GRAPH_SPEED_DEFAULT = 5,
+    TB_PERF_GRAPH_GAP = 2,
+    TB_PERF_VALUE_GAP = 2,
+    TB_PERF_VALUE_WIDTH_CHARS = 6,
+    TB_PERF_DISPLAY_HZ = 5,
+};
+
+enum
+{
+    TB_PERF_SAMPLE_MIN = 1,
+};
+
+static const double TB_PERF_KB_DIV = 1024.0;
+static const double TB_PERF_KC_DIV = 1000.0;
+static const double TB_PERF_PEAK_DECAY = 0.98;
+static const double TB_PERF_MIN_PEAK = 1.0;
+static const double TB_PERF_ROUND_EPS = 0.5;
+
+enum
+{
+    TB_METRIC_FPS = 0,
+    TB_METRIC_MEM,
+    TB_METRIC_TIC,
+    TB_METRIC_SCN_BDR,
+    TB_METRIC_CUSTOM0,
+    TB_METRIC_CUSTOM1,
+    TB_METRIC_CUSTOM2,
+    TB_METRIC_CUSTOM3,
 };
 
 static inline u8 tb_map_color(const tic_mem* tic, int color)
@@ -38,11 +61,40 @@ static double tb_ema_update(double prev, double value, double alpha, bool* initi
     return prev + alpha * (value - prev);
 }
 
-static void tb_format_float1(char* out, size_t cap, double value)
+static uint64_t tb_round_u64(double value)
+{
+    if(value <= 0.0) return 0;
+    return (uint64_t)(value + TB_PERF_ROUND_EPS);
+}
+
+static void tb_format_u64(char* out, size_t cap, uint64_t value)
 {
     if(!out || cap == 0) return;
-    snprintf(out, cap, "%.1f", value);
-    tb_trim_trailing_zeros(out);
+    snprintf(out, cap, "%llu", (unsigned long long)value);
+}
+
+// static size_t tb_value_width(const char* value)
+// {
+//     return value ? strlen(value) : 0;
+// }
+
+static void tb_pad_left(char* out, size_t cap, const char* value, size_t width)
+{
+    if(!out || cap == 0) return;
+    if(!value) value = "";
+    size_t len = strlen(value);
+    size_t pad = width > len ? (width - len) : 0;
+    size_t needed = pad + len + 1;
+    if(needed > cap)
+    {
+        strncpy(out, value, cap - 1);
+        out[cap - 1] = '\0';
+        return;
+    }
+
+    memset(out, ' ', pad);
+    memcpy(out + pad, value, len);
+    out[pad + len] = '\0';
 }
 
 static int tb_clamp_int(int value, int min_value, int max_value)
@@ -54,7 +106,7 @@ static int tb_clamp_int(int value, int min_value, int max_value)
 
 static int tb_luma(const tic_rgb* c)
 {
-    return c ? (c->r * 3 + c->g * 4 + c->b) : 0;
+    return c ? (c->r * 3 + c->g * 4 + c->b * 1) : 0;
 }
 
 static int tb_rgb_dist_sq(const tic_rgb* a, const tic_rgb* b)
@@ -171,50 +223,96 @@ static void tb_print_outline(tic_mem* tic, const char* text, s32 x, s32 y, u8 ou
     }
 }
 
-static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, s32 x, s32 y, u8 graph_color, u8 outline_color)
+static double tb_graph_sample(const tb_perf_hud_state* state, int metric, uint32_t index)
+{
+    uint32_t count = state->graph_count[metric];
+    if(count == 0)
+        return 0.0;
+
+    uint32_t max = (uint32_t)TB_PERF_GRAPH_WIDTH_MAX;
+    uint32_t head = state->graph_head[metric];
+    uint32_t start = (head + max - count) % max;
+    uint32_t idx = (start + index) % max;
+    return state->graph_values[metric][idx];
+}
+
+static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metric, s32 x, s32 y, u8 graph_color)
 {
     if(!tic || !state) return;
 
-    const s32 width = TB_PERF_GRAPH_WIDTH;
-    const s32 height = TB_PERF_GRAPH_HEIGHT;
+    const s32 width = state->graph_width;
+    const s32 height = state->graph_height;
+    if(width <= 0 || height <= 0) return;
 
-    const s32 left = x;
-    const s32 top = y;
-    const s32 right = x + width - 1;
-    const s32 bottom = y + height - 1;
-    const s32 inner_top = top + 1;
-    const s32 inner_bottom = bottom - 1;
+    uint32_t count = state->graph_count[metric];
+    if(count == 0) return;
 
-    for(s32 px = left; px <= right; px++)
-    {
-        tb_poke4_safe(tic, px, top, outline_color);
-        tb_poke4_safe(tic, px, bottom, outline_color);
-    }
+    double peak = state->graph_peak[metric];
+    if(peak < TB_PERF_MIN_PEAK)
+        peak = TB_PERF_MIN_PEAK;
 
-    for(s32 py = top; py <= bottom; py++)
-    {
-        tb_poke4_safe(tic, left, py, outline_color);
-        tb_poke4_safe(tic, right, py, outline_color);
-    }
-
-    double peak = state->graph_peak;
-    if(peak < 1.0)
-        peak = 1.0;
-
+    int prev_y = -1;
     for(s32 i = 0; i < width; i++)
     {
-        uint32_t idx = (state->graph_head + (uint32_t)i) % TB_PERF_GRAPH_WIDTH;
-        double value = state->graph_values[idx];
-        double norm = value / peak;
-        if(norm < 0.0) norm = 0.0;
-        if(norm > 1.0) norm = 1.0;
-        int bar = (int)floor(norm * (double)(height - 3) + 0.5);
-        s32 px = x + i;
-        s32 py = inner_bottom - bar;
-        if(py < inner_top) py = inner_top;
+        uint32_t start = (uint32_t)((uint64_t)i * count / (uint32_t)width);
+        uint32_t end = (uint32_t)((uint64_t)(i + 1) * count / (uint32_t)width);
+        if(end > 0) end -= 1; // make end inclusive
+        if(end < start) end = start;
 
-        for(s32 yy = py; yy <= inner_bottom; yy++)
-            tb_poke4_safe(tic, px, yy, graph_color);
+        double vmin = tb_graph_sample(state, metric, start);
+        double vmax = vmin;
+        for(uint32_t s = start + 1; s <= end; s++)
+        {
+            double v = tb_graph_sample(state, metric, s);
+            if(v < vmin) vmin = v;
+            if(v > vmax) vmax = v;
+        }
+
+        double nmax = vmax / peak;
+        double nmin = vmin / peak;
+        if(nmax < 0.0) nmax = 0.0;
+        if(nmax > 1.0) nmax = 1.0;
+        if(nmin < 0.0) nmin = 0.0;
+        if(nmin > 1.0) nmin = 1.0;
+
+        s32 y_max = y + (height - 1) - (s32)floor(nmax * (double)(height - 1) + 0.5);
+        s32 y_min = y + (height - 1) - (s32)floor(nmin * (double)(height - 1) + 0.5);
+
+        if(y_min < y_max)
+        {
+            s32 tmp = y_min;
+            y_min = y_max;
+            y_max = tmp;
+        }
+
+        s32 px = x + i;
+        if(end > start)
+        {
+            for(s32 py = y_max; py <= y_min; py++)
+                tb_poke4_safe(tic, px, py, graph_color);
+            prev_y = -1;
+        }
+        else
+        {
+            if(prev_y >= 0)
+            {
+                s32 y0 = prev_y;
+                s32 y1 = y_max;
+                if(y0 > y1)
+                {
+                    s32 tmp = y0;
+                    y0 = y1;
+                    y1 = tmp;
+                }
+                for(s32 py = y0; py <= y1; py++)
+                    tb_poke4_safe(tic, px, py, graph_color);
+            }
+            else
+            {
+                tb_poke4_safe(tic, px, y_max, graph_color);
+            }
+            prev_y = y_max;
+        }
     }
 }
 
@@ -223,8 +321,11 @@ void ticbuild_perf_hud_init(tb_perf_hud_state* state)
     if(!state) return;
     memset(state, 0, sizeof *state);
     tb_fps_init(&state->fps);
-    state->graph_speed = 5;
-    state->graph_peak = 1.0;
+    state->graph_speed = TB_PERF_GRAPH_SPEED_DEFAULT;
+    state->graph_width = TB_PERF_GRAPH_WIDTH_DEFAULT;
+    state->graph_height = TB_PERF_GRAPH_HEIGHT_DEFAULT;
+    for(int i = 0; i < TB_PERF_METRIC_COUNT; i++)
+        state->graph_peak[i] = 1.0;
     state->palette_text = -1;
     state->palette_outline = -1;
     state->palette_graph = -1;
@@ -241,7 +342,7 @@ void ticbuild_perf_hud_set_palette_override(tb_perf_hud_state* state, int text, 
 void ticbuild_perf_hud_adjust_graph_speed(tb_perf_hud_state* state, int delta)
 {
     if(!state) return;
-    state->graph_speed = tb_clamp_int(state->graph_speed + delta, 1, TB_PERF_GRAPH_SPEED_MAX);
+    state->graph_speed = tb_clamp_int(state->graph_speed + delta, TB_PERF_GRAPH_SPEED_MIN, TB_PERF_GRAPH_SPEED_MAX);
 }
 
 int ticbuild_perf_hud_get_graph_speed(const tb_perf_hud_state* state)
@@ -262,36 +363,46 @@ void ticbuild_perf_hud_draw(
     if(!run_mode) return;
 
     tb_fps_on_frame(&state->fps, counter, freq);
-    double fps_value = tb_fps_get_value(&state->fps);
+    double raw[TB_PERF_METRIC_COUNT];
+    raw[TB_METRIC_FPS] = tb_fps_get_value(&state->fps);
+    raw[TB_METRIC_MEM] = (double)metrics->lua_mem_bytes / TB_PERF_KB_DIV;
+    raw[TB_METRIC_TIC] = (double)metrics->tic_cycles / TB_PERF_KC_DIV;
+    raw[TB_METRIC_SCN_BDR] = (double)(metrics->scn_cycles + metrics->bdr_cycles) / TB_PERF_KC_DIV;
+    raw[TB_METRIC_CUSTOM0] = (double)metrics->custom[0];
+    raw[TB_METRIC_CUSTOM1] = (double)metrics->custom[1];
+    raw[TB_METRIC_CUSTOM2] = (double)metrics->custom[2];
+    raw[TB_METRIC_CUSTOM3] = (double)metrics->custom[3];
 
-    double mem_kb = (double)metrics->lua_mem_bytes / 1024.0;
-    double tic_kc = (double)metrics->tic_cycles / 1000.0;
-    double scn_bdr_kc = (double)(metrics->scn_cycles + metrics->bdr_cycles) / 1000.0;
-    double total_kc = tic_kc + scn_bdr_kc;
+    static const double alphas[TB_PERF_METRIC_COUNT] =
+    {
+        0.2, // FPS
+        0.2, // MEM
+        0.25, // TIC
+        0.25, // SCN_BDR
+        0.25, // CUSTOM0
+        0.25, // CUSTOM1
+        0.25, // CUSTOM2
+        0.25, // CUSTOM3
+    };
 
-    if(!state->ema_initialized)
+    for(int i = 0; i < TB_PERF_METRIC_COUNT; i++)
     {
-        state->fps_ema = fps_value;
-        state->mem_kb_ema = mem_kb;
-        state->tic_kc_ema = tic_kc;
-        state->scn_bdr_kc_ema = scn_bdr_kc;
-        state->total_kc_ema = total_kc;
-        state->ema_initialized = true;
-    }
-    else
-    {
-        state->fps_ema = tb_ema_update(state->fps_ema, fps_value, 0.2, &state->ema_initialized);
-        state->mem_kb_ema = tb_ema_update(state->mem_kb_ema, mem_kb, 0.2, &state->ema_initialized);
-        state->tic_kc_ema = tb_ema_update(state->tic_kc_ema, tic_kc, 0.25, &state->ema_initialized);
-        state->scn_bdr_kc_ema = tb_ema_update(state->scn_bdr_kc_ema, scn_bdr_kc, 0.25, &state->ema_initialized);
-        state->total_kc_ema = tb_ema_update(state->total_kc_ema, total_kc, 0.25, &state->ema_initialized);
+        if(!state->ema_initialized[i])
+        {
+            state->ema[i] = raw[i];
+            state->ema_initialized[i] = true;
+        }
+        else
+        {
+            state->ema[i] = tb_ema_update(state->ema[i], raw[i], alphas[i], &state->ema_initialized[i]);
+        }
     }
 
     uint64_t display_interval = 0;
     if(freq > 0)
-        display_interval = freq / 5;
+        display_interval = freq / TB_PERF_DISPLAY_HZ;
     if(display_interval == 0)
-        display_interval = 1;
+        display_interval = TB_PERF_SAMPLE_MIN;
 
     bool update_display = false;
     if(state->last_display_counter == 0 || counter < state->last_display_counter ||
@@ -303,11 +414,8 @@ void ticbuild_perf_hud_draw(
 
     if(update_display)
     {
-        state->fps_display = state->fps_ema;
-        state->mem_kb_display = state->mem_kb_ema;
-        state->tic_kc_display = state->tic_kc_ema;
-        state->scn_bdr_kc_display = state->scn_bdr_kc_ema;
-        state->total_kc_display = state->total_kc_ema;
+        for(int i = 0; i < TB_PERF_METRIC_COUNT; i++)
+            state->display[i] = state->ema[i];
     }
 
     int stride = (TB_PERF_GRAPH_SPEED_MAX + 1 - state->graph_speed);
@@ -315,17 +423,23 @@ void ticbuild_perf_hud_draw(
     if(state->graph_frame_accum >= (uint32_t)stride)
     {
         state->graph_frame_accum = 0;
-        state->graph_values[state->graph_head] = state->total_kc_ema;
-        state->graph_head = (state->graph_head + 1) % TB_PERF_GRAPH_WIDTH;
+        for(int i = 0; i < TB_PERF_METRIC_COUNT; i++)
+        {
+            uint32_t head = state->graph_head[i];
+            state->graph_values[i][head] = state->ema[i];
+            state->graph_head[i] = (head + 1) % TB_PERF_GRAPH_WIDTH_MAX;
+            if(state->graph_count[i] < TB_PERF_GRAPH_WIDTH_MAX)
+                state->graph_count[i]++;
 
-        if(state->total_kc_ema > state->graph_peak)
-            state->graph_peak = state->total_kc_ema;
-        else
-            state->graph_peak *= 0.98;
+            if(state->ema[i] > state->graph_peak[i])
+                state->graph_peak[i] = state->ema[i];
+            else
+                state->graph_peak[i] *= TB_PERF_PEAK_DECAY;
+
+            if(state->graph_peak[i] < TB_PERF_MIN_PEAK)
+                state->graph_peak[i] = TB_PERF_MIN_PEAK;
+        }
     }
-
-    if(state->graph_peak < 1.0)
-        state->graph_peak = 1.0;
 
     if(mode == TB_PERF_HUD_OFF)
         return;
@@ -342,51 +456,85 @@ void ticbuild_perf_hud_draw(
     u8 outline_mapped = tb_map_color(tic, outline_color);
     u8 graph_mapped = tb_map_color(tic, graph_color);
 
-    tb_draw_graph(tic, state, TB_PERF_GRAPH_X, TB_PERF_GRAPH_Y, graph_mapped, outline_mapped);
+    int graph_width = state->graph_width;
+    int graph_height = state->graph_height;
+    if(graph_width <= 0 || graph_width > TB_PERF_GRAPH_WIDTH_MAX)
+        graph_width = TB_PERF_GRAPH_WIDTH_DEFAULT;
+    if(graph_height <= 0)
+        graph_height = TB_PERF_GRAPH_HEIGHT_DEFAULT;
 
-    char fpsbuf[32];
-    char membuf[32];
-    char ticbuf[32];
-    char scnbuf[32];
-    char totbuf[32];
+    state->graph_width = graph_width;
+    state->graph_height = graph_height;
 
-    tb_format_float1(fpsbuf, sizeof fpsbuf, state->fps_display);
-    tb_format_float1(membuf, sizeof membuf, state->mem_kb_display);
-    tb_format_float1(ticbuf, sizeof ticbuf, state->tic_kc_display);
-    tb_format_float1(scnbuf, sizeof scnbuf, state->scn_bdr_kc_display);
-    tb_format_float1(totbuf, sizeof totbuf, state->total_kc_display);
+    const int metrics_full[] =
+    {
+        TB_METRIC_FPS,
+        TB_METRIC_MEM,
+        TB_METRIC_TIC,
+        TB_METRIC_SCN_BDR,
+        TB_METRIC_CUSTOM0,
+        TB_METRIC_CUSTOM1,
+        TB_METRIC_CUSTOM2,
+        TB_METRIC_CUSTOM3,
+    };
 
-    char line0[64];
-    char line1[64];
-    char line2[64];
-    char line3[64];
-    char line4[64];
+    const int metrics_min[] =
+    {
+        TB_METRIC_FPS,
+        TB_METRIC_MEM,
+        TB_METRIC_TIC,
+        TB_METRIC_SCN_BDR,
+    };
 
-    snprintf(line0, sizeof line0, "FPS      %s", fpsbuf);
-    snprintf(line1, sizeof line1, "MEM KB   %s", membuf);
-    snprintf(line2, sizeof line2, "TIC KCY  %s", ticbuf);
-    snprintf(line3, sizeof line3, "SCN+BDR  %s", scnbuf);
-    snprintf(line4, sizeof line4, "TOTAL    %s", totbuf);
-
-    const char* lines_full[] = {line0, line1, line2, line3, line4};
-    const char* lines_min[] = {line0, line4};
-
-    const char** lines = lines_full;
-    size_t line_count = COUNT_OF(lines_full);
+    const int* metric_list = metrics_full;
+    size_t metric_count = COUNT_OF(metrics_full);
     if(mode == TB_PERF_HUD_MINIMAL)
     {
-        lines = lines_min;
-        line_count = COUNT_OF(lines_min);
+        metric_list = metrics_min;
+        metric_count = COUNT_OF(metrics_min);
     }
 
-    enum {Padding = 2, LineHeight = TIC_FONT_HEIGHT + 1};
-    s32 x = TB_PERF_GRAPH_X;
-    s32 y = TB_PERF_GRAPH_Y + TB_PERF_GRAPH_HEIGHT + 2;
-
-    for(size_t i = 0; i < line_count; i++)
+    const char* labels[TB_PERF_METRIC_COUNT] =
     {
-        s32 ty = y + Padding + (s32)i * LineHeight;
-        tb_print_outline(tic, lines[i], x + Padding, ty, outline_mapped);
-        tic_api_print(tic, lines[i], x + Padding, ty, (u8)text_color, true, 1, true);
+        "FPS",
+        "MEM",
+        "TIC",
+        "SCN",
+        "USR1",
+        "USR2",
+        "USR3",
+        "USR4",
+    };
+
+    char value_buf[TB_PERF_METRIC_COUNT][32];
+    for(size_t i = 0; i < metric_count; i++)
+    {
+        int idx = metric_list[i];
+        uint64_t value = tb_round_u64(state->display[idx]);
+        tb_format_u64(value_buf[idx], sizeof value_buf[idx], value);
+    }
+
+    s32 graph_x = 0;
+    s32 graph_y = 0;
+    s32 value_x = graph_x + graph_width + TB_PERF_GRAPH_GAP;
+    s32 label_x = value_x + (s32)TB_PERF_VALUE_WIDTH_CHARS * (s32)tic->ram->font.alt.width + TB_PERF_VALUE_GAP;
+    s32 text_offset = (graph_height - tic->ram->font.alt.height) / 2;
+    if(text_offset < 0) text_offset = 0;
+
+    for(size_t row = 0; row < metric_count; row++)
+    {
+        int metric = metric_list[row];
+        s32 row_y = graph_y + (s32)row * graph_height;
+        s32 text_y = row_y + text_offset;
+
+        tb_draw_graph(tic, state, metric, graph_x, row_y, graph_mapped);
+
+        char padded_value[32];
+        tb_pad_left(padded_value, sizeof padded_value, value_buf[metric], TB_PERF_VALUE_WIDTH_CHARS);
+        tb_print_outline(tic, padded_value, value_x, text_y, outline_mapped);
+        tic_api_print(tic, padded_value, value_x, text_y, (u8)text_color, true, 1, true);
+
+        tb_print_outline(tic, labels[metric], label_x, text_y, outline_mapped);
+        tic_api_print(tic, labels[metric], label_x, text_y, (u8)text_color, true, 1, true);
     }
 }

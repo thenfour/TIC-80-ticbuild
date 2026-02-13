@@ -11,6 +11,14 @@ extern "C"
 {
 #endif
 
+    enum
+    {
+        TB_PERF_METRIC_COUNT = 8,
+        TB_PERF_GRAPH_WIDTH_MAX = 240,
+        TB_PERF_GRAPH_WIDTH_DEFAULT = 188,
+        TB_PERF_GRAPH_HEIGHT_DEFAULT = 15,
+    };
+
     typedef enum
     {
         TB_PERF_HUD_OFF = 0,
@@ -24,32 +32,27 @@ extern "C"
         uint64_t scn_cycles;
         uint64_t bdr_cycles;
         uint64_t lua_mem_bytes;
+        uint64_t custom[4];
     } tb_perf_metrics;
 
     typedef struct
     {
         tb_fps_tracker fps;
 
-        double fps_ema;
-        double mem_kb_ema;
-        double tic_kc_ema;
-        double scn_bdr_kc_ema;
-        double total_kc_ema;
+        double ema[TB_PERF_METRIC_COUNT];
+        double display[TB_PERF_METRIC_COUNT];
 
-        double fps_display;
-        double mem_kb_display;
-        double tic_kc_display;
-        double scn_bdr_kc_display;
-        double total_kc_display;
-
-        double graph_values[188];
-        double graph_peak;
-        uint32_t graph_head;
+        double graph_values[TB_PERF_METRIC_COUNT][TB_PERF_GRAPH_WIDTH_MAX];
+        double graph_peak[TB_PERF_METRIC_COUNT];
+        uint32_t graph_head[TB_PERF_METRIC_COUNT];
+        uint32_t graph_count[TB_PERF_METRIC_COUNT];
         uint32_t graph_frame_accum;
         int graph_speed;
+        int graph_width;
+        int graph_height;
 
         uint64_t last_display_counter;
-        bool ema_initialized;
+        bool ema_initialized[TB_PERF_METRIC_COUNT];
 
         int palette_text;
         int palette_outline;

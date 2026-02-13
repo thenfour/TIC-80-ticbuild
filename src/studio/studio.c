@@ -236,6 +236,8 @@ struct Studio
     tb_perf_hud_state perfHud;
     tb_perf_hud_mode perfHudMode;
     tb_perf_metrics perfFrame;
+    uint64_t title_last_counter;
+    bool title_pending;
 
     Bytebattle bytebattle;
 
@@ -2523,6 +2525,7 @@ static void renderStudio(Studio* studio)
         ticbuild_user_timing_end_frame(tic);
         ticbuild_user_timing_get_last_cycles(tic, &studio->perfFrame.tic_cycles, &studio->perfFrame.scn_cycles, &studio->perfFrame.bdr_cycles);
         studio->perfFrame.lua_mem_bytes = ticbuild_lua_perf_get_mem_bytes(tic);
+        memset(studio->perfFrame.custom, 0, sizeof studio->perfFrame.custom);
     }
     else
     {
@@ -2844,10 +2847,25 @@ void studio_tick(Studio* studio, tic80_input input)
                 studio->perfFrame.scn_cycles,
                 studio->perfFrame.bdr_cycles,
                 studio->perfFrame.lua_mem_bytes);
-            ticbuild_remoting_on_frame(studio->remoting, tic_sys_counter_get(), tic_sys_freq_get());
+            uint64_t counter = tic_sys_counter_get();
+            uint64_t freq = tic_sys_freq_get();
+            ticbuild_remoting_on_frame(studio->remoting, counter, freq);
 
-            if(ticbuild_remoting_take_title_dirty(studio->remoting)) {
-                updateTitle(studio);
+            if(ticbuild_remoting_take_title_dirty(studio->remoting))
+                studio->title_pending = true;
+
+            if(studio->title_pending)
+            {
+                uint64_t interval = freq > 0 ? (freq / STUDIO_TITLE_UPDATE_HZ) : STUDIO_TITLE_MIN_INTERVAL;
+                if(interval == 0) interval = STUDIO_TITLE_MIN_INTERVAL;
+
+                if(studio->title_last_counter == 0 || counter < studio->title_last_counter ||
+                    (counter - studio->title_last_counter) >= interval)
+                {
+                    updateTitle(studio);
+                    studio->title_last_counter = counter;
+                    studio->title_pending = false;
+                }
             }
         }
 #endif
@@ -3204,6 +3222,8 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .remotingPort = 0,
 
         .perfHudMode = TB_PERF_HUD_OFF,
+        .title_last_counter = 0,
+        .title_pending = false,
 
         .bytebattle = {0},
 #endif
