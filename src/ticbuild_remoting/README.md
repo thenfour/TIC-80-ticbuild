@@ -1,7 +1,7 @@
 # Features in this fork
 
 - Remoting server
-- Frame timing and remoting display in window title
+- Frame timing and remoting display in window title and HUD (access via <kbd>ALT+0</kbd>)
 
 # remoting support for ticbuild
 
@@ -123,7 +123,7 @@ If the file already exists, it shall be overwritten.
 
 The file is to be deleted when the server stops listening.
 
-The file will be placed in `%LOCALAPPDATA%\TIC-80\remoting\sessions\` and
+The global file will be placed in `%LOCALAPPDATA%\TIC-80\remoting\sessions\` and
 the file is to be named `tic80-remote.<pid>.json`. Its contents will look like,
 
 ```json
@@ -144,6 +144,17 @@ remote session file.
 `tic80.exe --remote-session-location=c:\my\folder`
 
 will write the discovery file as `c:\my\folder\tic80-remote.<pid>.json`
+
+The global discovery location (under `%LOCALAPPDATA%`) is written unless disabled
+with the `--global-disco=OFF|ON` command line arg. It is `ON` by default. The
+user-specified `--remote-session-location` file is always written regardless of
+the global flag.
+
+example:
+
+`tic80.exe --remote-session-location=c:\my\folder --global-disco=OFF`
+
+writes the remote session file to `c:\my\folder`
 
 # `typeschema <symbol>`
 

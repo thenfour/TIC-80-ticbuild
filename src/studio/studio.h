@@ -104,6 +104,8 @@ typedef struct
 
     s32 remotingPort;
     const char *remoteSessionLocation;
+    const char *globalDisco;
+    bool globalDiscoEnabled;
 
 #if defined(BUILD_EDITORS)
     const char *codeexport;

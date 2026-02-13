@@ -8,7 +8,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-static char g_discovery_path[MAX_PATH] = {0};
+static char g_discovery_path_global[MAX_PATH] = {0};
+static char g_discovery_path_custom[MAX_PATH] = {0};
 static bool g_discovery_active = false;
 
 static void tb_set_err(char* err, size_t errcap, const char* msg)
@@ -73,49 +74,42 @@ static bool tb_ensure_dir(const char* path, char* err, size_t errcap)
     return true;
 }
 
-bool tb_discovery_start(int port, const char* session_dir, char* err, size_t errcap)
+static bool tb_write_discovery_file(const char* dir, int port, const char* json, size_t json_len, char* outpath, size_t outcap, char* err, size_t errcap)
 {
-    if(g_discovery_active)
-        return true;
-
-    char dir[MAX_PATH];
-    if(session_dir && session_dir[0])
-    {
-        int dlen = snprintf(dir, sizeof dir, "%s", session_dir);
-        if(dlen < 0 || (size_t)dlen >= sizeof dir)
-        {
-            tb_set_err(err, errcap, "discovery path too long");
-            return false;
-        }
-    }
-    else
-    {
-        const char* local = getenv("LOCALAPPDATA");
-        if(!local || !local[0])
-        {
-            tb_set_err(err, errcap, "LOCALAPPDATA not set");
-            return false;
-        }
-
-        int dlen = snprintf(dir, sizeof dir, "%s\\TIC-80\\remoting\\sessions", local);
-        if(dlen < 0 || (size_t)dlen >= sizeof dir)
-        {
-            tb_set_err(err, errcap, "discovery path too long");
-            return false;
-        }
-    }
+    if(!dir || !dir[0])
+        return false;
 
     if(!tb_ensure_dir(dir, err, errcap))
         return false;
 
     DWORD pid = GetCurrentProcessId();
-    char path[MAX_PATH];
-    int plen = snprintf(path, sizeof path, "%s\\tic80-remote.%lu.json", dir, (unsigned long)pid);
-    if(plen < 0 || (size_t)plen >= sizeof path)
+    if(!outpath || outcap == 0)
+        return false;
+
+    int plen = snprintf(outpath, outcap, "%s\\tic80-remote.%lu.json", dir, (unsigned long)pid);
+    if(plen < 0 || (size_t)plen >= outcap)
     {
         tb_set_err(err, errcap, "discovery file path too long");
         return false;
     }
+
+    FILE* f = fopen(outpath, "wb");
+    if(!f)
+    {
+        tb_set_err(err, errcap, "failed to write discovery file");
+        return false;
+    }
+
+    fwrite(json, 1, json_len, f);
+    fclose(f);
+
+    return true;
+}
+
+bool tb_discovery_start(int port, const char* session_dir, bool global_disco, char* err, size_t errcap)
+{
+    if(g_discovery_active)
+        return true;
 
     SYSTEMTIME st;
     GetSystemTime(&st);
@@ -133,7 +127,7 @@ bool tb_discovery_start(int port, const char* session_dir, char* err, size_t err
         "  \"startedAt\": \"%s\",\n"
         "  \"remotingVersion\": \"%s\"\n"
         "}\n",
-        (unsigned long)pid, port, ts, TB_REMOTING_PROTOCOL_VERSION_STRING);
+        (unsigned long)GetCurrentProcessId(), port, ts, TB_REMOTING_PROTOCOL_VERSION_STRING);
 
     if(jlen < 0 || (size_t)jlen >= sizeof json)
     {
@@ -141,18 +135,39 @@ bool tb_discovery_start(int port, const char* session_dir, char* err, size_t err
         return false;
     }
 
-    FILE* f = fopen(path, "wb");
-    if(!f)
+    bool wrote_any = false;
+
+    if(session_dir && session_dir[0])
     {
-        tb_set_err(err, errcap, "failed to write discovery file");
-        return false;
+        if(tb_write_discovery_file(session_dir, port, json, (size_t)jlen, g_discovery_path_custom, sizeof g_discovery_path_custom, err, errcap))
+            wrote_any = true;
     }
 
-    fwrite(json, 1, (size_t)jlen, f);
-    fclose(f);
+    if(global_disco)
+    {
+        const char* local = getenv("LOCALAPPDATA");
+        if(!local || !local[0])
+        {
+            tb_set_err(err, errcap, "LOCALAPPDATA not set");
+            if(!wrote_any) return false;
+        }
+        else
+        {
+            char dir[MAX_PATH];
+            int dlen = snprintf(dir, sizeof dir, "%s\\TIC-80\\remoting\\sessions", local);
+            if(dlen < 0 || (size_t)dlen >= sizeof dir)
+            {
+                tb_set_err(err, errcap, "discovery path too long");
+                if(!wrote_any) return false;
+            }
+            else if(tb_write_discovery_file(dir, port, json, (size_t)jlen, g_discovery_path_global, sizeof g_discovery_path_global, err, errcap))
+                wrote_any = true;
+        }
+    }
 
-    strncpy(g_discovery_path, path, sizeof g_discovery_path);
-    g_discovery_path[sizeof g_discovery_path - 1] = '\0';
+    if(!wrote_any)
+        return false;
+
     g_discovery_active = true;
     return true;
 }
@@ -162,10 +177,13 @@ void tb_discovery_stop(void)
     if(!g_discovery_active)
         return;
 
-    if(g_discovery_path[0])
-        DeleteFileA(g_discovery_path);
+    if(g_discovery_path_global[0])
+        DeleteFileA(g_discovery_path_global);
+    if(g_discovery_path_custom[0])
+        DeleteFileA(g_discovery_path_custom);
 
-    g_discovery_path[0] = '\0';
+    g_discovery_path_global[0] = '\0';
+    g_discovery_path_custom[0] = '\0';
     g_discovery_active = false;
 }
 

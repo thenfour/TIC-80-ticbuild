@@ -3007,6 +3007,7 @@ static StartArgs parseArgs(s32 argc, char **argv)
     StartArgs args = {0};
     args.volume = -1;
     args.remotingPort = 0;
+    args.globalDiscoEnabled = true;
 
 #if defined(BUILD_EDITORS)
     args.lowerlimit = 256;
@@ -3024,6 +3025,7 @@ static StartArgs parseArgs(s32 argc, char **argv)
 
         OPT_INTEGER('\0', "remoting-port", &args.remotingPort, "listen on 127.0.0.1:<port> for ticbuild remoting"),
         OPT_STRING('\0', "remote-session-location", &args.remoteSessionLocation, "directory to write remoting discovery file"),
+        OPT_STRING('\0', "global-disco", &args.globalDisco, "enable or disable global discovery file (ON|OFF)"),
 
         OPT_GROUP("Byte battle options:\n"),
         OPT_STRING('\0',    "codeexport",    &args.codeexport,   "export code to filename"),
@@ -3045,6 +3047,15 @@ static StartArgs parseArgs(s32 argc, char **argv)
     argparse_init(&argparse, options, usage, 0);
     argparse_describe(&argparse, "\n" TIC_NAME " startup options:", NULL);
     argc = argparse_parse(&argparse, argc, (const char**)argv);
+
+    if(args.globalDisco && args.globalDisco[0])
+    {
+        const char* s = args.globalDisco;
+        if(toupper((unsigned char)s[0]) == 'O' && toupper((unsigned char)s[1]) == 'F' && toupper((unsigned char)s[2]) == 'F')
+            args.globalDiscoEnabled = false;
+        else if(toupper((unsigned char)s[0]) == 'O' && toupper((unsigned char)s[1]) == 'N')
+            args.globalDiscoEnabled = true;
+    }
 
     if(argc == 1)
         args.cart = argv[0];
@@ -3272,7 +3283,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .metadata = remoting_metadata,
         };
 
-        studio->remoting = ticbuild_remoting_create(studio->remotingPort, args.remoteSessionLocation, &cb);
+        studio->remoting = ticbuild_remoting_create(studio->remotingPort, args.remoteSessionLocation, args.globalDiscoEnabled, &cb);
     }
 
     initSurfMode(studio);

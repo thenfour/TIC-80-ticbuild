@@ -32,7 +32,7 @@ typedef struct
     bool (*metadata)(void* userdata, const char* key, char* out, size_t outcap, char* err, size_t errcap);
 } ticbuild_remoting_callbacks;
 
-TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, const ticbuild_remoting_callbacks* callbacks);
+TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, bool global_disco, const ticbuild_remoting_callbacks* callbacks);
 void ticbuild_remoting_close(TicbuildRemoting* ctx);
 
 void ticbuild_remoting_tick(TicbuildRemoting* ctx);
