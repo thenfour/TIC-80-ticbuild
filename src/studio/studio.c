@@ -3056,9 +3056,12 @@ static StartArgs parseArgs(s32 argc, char **argv)
     args.volume = -1;
     args.remotingPort = 0;
     args.globalDiscoEnabled = true;
-    args.hudPaletteText = -1;
-    args.hudPaletteOutline = -1;
-    args.hudPaletteGraph = -1;
+    args.threshFpsWarn = 57;
+    args.threshFpsAlert = 53;
+    args.threshMemWarn = 102400;
+    args.threshMemAlert = 256000;
+    args.threshCyclesWarn = 1800;
+    args.threshCyclesAlert = 2400;
 
 #if defined(BUILD_EDITORS)
     args.lowerlimit = 256;
@@ -3077,9 +3080,17 @@ static StartArgs parseArgs(s32 argc, char **argv)
         OPT_INTEGER('\0', "remoting-port", &args.remotingPort, "listen on 127.0.0.1:<port> for ticbuild remoting"),
         OPT_STRING('\0', "remote-session-location", &args.remoteSessionLocation, "directory to write remoting discovery file"),
         OPT_STRING('\0', "global-disco", &args.globalDisco, "enable or disable global discovery file (ON|OFF)"),
-    OPT_INTEGER('\0', "hud-palette-text", &args.hudPaletteText, "perf HUD text palette index (0-15)"),
-    OPT_INTEGER('\0', "hud-palette-outline", &args.hudPaletteOutline, "perf HUD outline palette index (0-15)"),
-    OPT_INTEGER('\0', "hud-palette-graph", &args.hudPaletteGraph, "perf HUD graph palette index (0-15)"),
+    OPT_STRING('\0', "hud-palette-text", &args.hudPaletteText, "perf HUD text palette color (auto, 0-15, rgb, or rrggbb)"),
+    OPT_STRING('\0', "hud-palette-outline", &args.hudPaletteOutline, "perf HUD outline palette color (auto, 0-15, rgb, or rrggbb)"),
+    OPT_STRING('\0', "hud-palette-ok", &args.hudPaletteOk, "perf HUD OK palette color (auto, 0-15, rgb, or rrggbb)"),
+    OPT_STRING('\0', "hud-palette-warning", &args.hudPaletteWarning, "perf HUD warning palette color (auto, 0-15, rgb, or rrggbb)"),
+    OPT_STRING('\0', "hud-palette-alert", &args.hudPaletteAlert, "perf HUD alert palette color (auto, 0-15, rgb, or rrggbb)"),
+    OPT_INTEGER('\0', "thresh-fps-warn", &args.threshFpsWarn, "warn if FPS drops below this value"),
+    OPT_INTEGER('\0', "thresh-fps-alert", &args.threshFpsAlert, "alert if FPS drops below this value"),
+    OPT_INTEGER('\0', "thresh-mem-warn", &args.threshMemWarn, "warn if memory (KB) rises above this value"),
+    OPT_INTEGER('\0', "thresh-mem-alert", &args.threshMemAlert, "alert if memory (KB) rises above this value"),
+    OPT_INTEGER('\0', "thresh-cycles-warn", &args.threshCyclesWarn, "warn if cycle count (kcycles) rises above this value"),
+    OPT_INTEGER('\0', "thresh-cycles-alert", &args.threshCyclesAlert, "alert if cycle count (kcycles) rises above this value"),
 
         OPT_GROUP("Byte battle options:\n"),
         OPT_STRING('\0',    "codeexport",    &args.codeexport,   "export code to filename"),
@@ -3246,7 +3257,17 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         &studio->perfHud,
         args.hudPaletteText,
         args.hudPaletteOutline,
-        args.hudPaletteGraph);
+        args.hudPaletteOk,
+        args.hudPaletteWarning,
+        args.hudPaletteAlert);
+    ticbuild_perf_hud_set_thresholds(
+        &studio->perfHud,
+        args.threshFpsWarn,
+        args.threshFpsAlert,
+        args.threshMemWarn,
+        args.threshMemAlert,
+        args.threshCyclesWarn,
+        args.threshCyclesAlert);
 #endif
 
     {

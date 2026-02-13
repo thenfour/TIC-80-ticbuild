@@ -3,6 +3,51 @@
 - Remoting server
 - Frame timing and remoting display in window title and HUD (access via <kbd>ALT+0</kbd>)
 
+# Perf HUD color scheme and thresholds
+
+HUD colors are configured with these optional command line args:
+
+- `--hud-palette-outline`
+- `--hud-palette-text`
+- `--hud-palette-ok`
+- `--hud-palette-warning`
+- `--hud-palette-alert`
+
+Each value can be:
+
+- `auto` (use built-in target color matching against current frame palette)
+- a palette index (`0` to `15`)
+- a hex color token without `#`, in either `rgb` or `rrggbb` form (`f80`, `ff8800`)
+
+`auto` default targets are:
+
+- outline: black
+- text: white
+- ok: green
+- warning: orange/yellow
+- alert: red
+
+Threshold command line args:
+
+- `--thresh-fps-warn` (fps)
+- `--thresh-fps-alert` (fps)
+- `--thresh-mem-warn` (kb)
+- `--thresh-mem-alert` (kb)
+- `--thresh-cycles-warn` (kcycles)
+- `--thresh-cycles-alert` (kcycles)
+
+Default thresholds:
+
+- FPS: warning `<57`, alert `<53`
+- MEM: warning `>102400` kb, alert `>256000` kb
+- cycles (TIC/SCN+BDR): warning `>1800` kcycles, alert `>2400` kcycles
+
+Threshold state is checked as alert first, then warning, then OK. For FPS (lower is
+worse), comparisons are inverted.
+
+Graph coloring is evaluated per rendered x-column and value text is colored by the
+same severity. Custom perf metrics always use OK color.
+
 # remoting support for ticbuild
 
 [ticbuild](https://github.com/thenfour/ticbuild) is a build system for TIC-80 which

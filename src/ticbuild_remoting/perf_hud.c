@@ -3,8 +3,10 @@
 #include "tools.h"
 #include "tilesheet.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum
@@ -49,6 +51,25 @@ enum
     TB_METRIC_CUSTOM2,
     TB_METRIC_CUSTOM3,
 };
+
+typedef enum
+{
+    TB_SEVERITY_OK = 0,
+    TB_SEVERITY_WARNING,
+    TB_SEVERITY_ALERT,
+} tb_perf_severity;
+
+enum
+{
+    TB_HEX_SHORT_LEN = 3,
+    TB_HEX_FULL_LEN = 6,
+};
+
+static const tic_rgb TB_COLOR_TEXT_DEFAULT = {255, 255, 255};
+static const tic_rgb TB_COLOR_OUTLINE_DEFAULT = {0, 0, 0};
+static const tic_rgb TB_COLOR_OK_DEFAULT = {0, 220, 90};
+static const tic_rgb TB_COLOR_WARNING_DEFAULT = {255, 160, 0};
+static const tic_rgb TB_COLOR_ALERT_DEFAULT = {255, 40, 40};
 
 static inline u8 tb_map_color(const tic_mem* tic, int color)
 {
@@ -138,59 +159,245 @@ static int tb_rgb_dist_sq(const tic_rgb* a, const tic_rgb* b)
     return dr * dr + dg * dg + db * db;
 }
 
-static void tb_pick_palette(tic_mem* tic, int* out_text, int* out_outline, int* out_graph)
+static int tb_hex_nibble(char ch)
 {
-    tic_rgb colors[TIC_PALETTE_SIZE];
+    if(ch >= '0' && ch <= '9') return ch - '0';
+    if(ch >= 'a' && ch <= 'f') return 10 + (ch - 'a');
+    if(ch >= 'A' && ch <= 'F') return 10 + (ch - 'A');
+    return -1;
+}
+
+static bool tb_is_ascii_whitespace(char ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+static bool tb_is_decimal_token(const char* value)
+{
+    if(!value || !value[0]) return false;
+    for(const char* p = value; *p; p++)
+    {
+        if(*p < '0' || *p > '9')
+            return false;
+    }
+    return true;
+}
+
+static int tb_parse_palette_index(const char* value)
+{
+    if(!tb_is_decimal_token(value))
+        return -1;
+
+    char* end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if(end == value || (end && *end))
+        return -1;
+
+    if(parsed < 0 || parsed >= TIC_PALETTE_SIZE)
+        return -1;
+
+    return (int)parsed;
+}
+
+static bool tb_parse_hex_rgb(const char* value, tic_rgb* out)
+{
+    if(!value || !out) return false;
+    size_t len = strlen(value);
+    if(len != TB_HEX_SHORT_LEN && len != TB_HEX_FULL_LEN)
+        return false;
+
+    if(len == TB_HEX_SHORT_LEN)
+    {
+        int r = tb_hex_nibble(value[0]);
+        int g = tb_hex_nibble(value[1]);
+        int b = tb_hex_nibble(value[2]);
+        if(r < 0 || g < 0 || b < 0)
+            return false;
+
+        out->r = (u8)((r << 4) | r);
+        out->g = (u8)((g << 4) | g);
+        out->b = (u8)((b << 4) | b);
+        return true;
+    }
+
+    int r1 = tb_hex_nibble(value[0]);
+    int r2 = tb_hex_nibble(value[1]);
+    int g1 = tb_hex_nibble(value[2]);
+    int g2 = tb_hex_nibble(value[3]);
+    int b1 = tb_hex_nibble(value[4]);
+    int b2 = tb_hex_nibble(value[5]);
+    if(r1 < 0 || r2 < 0 || g1 < 0 || g2 < 0 || b1 < 0 || b2 < 0)
+        return false;
+
+    out->r = (u8)((r1 << 4) | r2);
+    out->g = (u8)((g1 << 4) | g2);
+    out->b = (u8)((b1 << 4) | b2);
+    return true;
+}
+
+static bool tb_equals_ignore_case(const char* a, const char* b)
+{
+    if(!a || !b) return false;
+    while(*a && *b)
+    {
+        if(tolower((unsigned char)*a) != tolower((unsigned char)*b))
+            return false;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static void tb_trim_ascii(char* value)
+{
+    if(!value) return;
+
+    size_t len = strlen(value);
+    size_t start = 0;
+    while(start < len && tb_is_ascii_whitespace(value[start]))
+        start++;
+
+    size_t end = len;
+    while(end > start && tb_is_ascii_whitespace(value[end - 1]))
+        end--;
+
+    if(start > 0 && end > start)
+        memmove(value, value + start, end - start);
+
+    value[end - start] = '\0';
+}
+
+static void tb_set_color_spec_default(tb_perf_hud_color_spec* spec, const tic_rgb* target)
+{
+    if(!spec || !target) return;
+    spec->enabled = false;
+    spec->palette_index = -1;
+    spec->use_auto = true;
+    spec->target = *target;
+}
+
+static void tb_parse_color_spec(const char* value, const tic_rgb* fallback, tb_perf_hud_color_spec* spec)
+{
+    if(!spec || !fallback) return;
+
+    tb_set_color_spec_default(spec, fallback);
+    if(!value || !value[0])
+        return;
+
+    char token[64];
+    strncpy(token, value, sizeof token - 1);
+    token[sizeof token - 1] = '\0';
+    tb_trim_ascii(token);
+    if(token[0] == '\0')
+        return;
+
+    spec->enabled = true;
+
+    if(tb_equals_ignore_case(token, "auto"))
+    {
+        spec->use_auto = true;
+        spec->target = *fallback;
+        return;
+    }
+
+    int palette_index = tb_parse_palette_index(token);
+    if(palette_index >= 0)
+    {
+        spec->use_auto = false;
+        spec->palette_index = palette_index;
+        return;
+    }
+
+    tic_rgb parsed = {0};
+    if(tb_parse_hex_rgb(token, &parsed))
+    {
+        spec->use_auto = true;
+        spec->target = parsed;
+        return;
+    }
+
+    tb_set_color_spec_default(spec, fallback);
+}
+
+static int tb_pick_palette_for_target(tic_mem* tic, const tic_rgb* target)
+{
+    if(!tic || !target) return 0;
+
+    int best = 0;
+    int best_dist = 0;
+
     for(int i = 0; i < TIC_PALETTE_SIZE; i++)
     {
         u8 mapped = tb_map_color(tic, i);
-        colors[i] = tic->ram->vram.palette.colors[mapped];
-    }
-
-    int best_a = 0;
-    int best_b = 1;
-    int best_dist = -1;
-    for(int i = 0; i < TIC_PALETTE_SIZE; i++)
-    {
-        for(int j = i + 1; j < TIC_PALETTE_SIZE; j++)
+        tic_rgb color = tic->ram->vram.palette.colors[mapped];
+        int dist = tb_rgb_dist_sq(&color, target);
+        if(i == 0 || dist < best_dist)
         {
-            int dist = tb_rgb_dist_sq(&colors[i], &colors[j]);
-            if(dist > best_dist)
-            {
-                best_dist = dist;
-                best_a = i;
-                best_b = j;
-            }
+            best_dist = dist;
+            best = i;
         }
     }
 
-    int text = best_a;
-    int outline = best_b;
-    if(tb_luma(&colors[text]) < tb_luma(&colors[outline]))
+    return best;
+}
+
+static int tb_resolve_color_spec(tic_mem* tic, const tb_perf_hud_color_spec* spec)
+{
+    if(!spec)
+        return 0;
+
+    if(!spec->use_auto)
+        return tb_clamp_int(spec->palette_index, 0, TIC_PALETTE_SIZE - 1);
+
+    return tb_pick_palette_for_target(tic, &spec->target);
+}
+
+static tb_perf_severity tb_classify_metric(const tb_perf_hud_state* state, int metric, double value)
+{
+    if(!state)
+        return TB_SEVERITY_OK;
+
+    if(metric >= TB_METRIC_CUSTOM0)
+        return TB_SEVERITY_OK;
+
+    const tb_perf_hud_thresholds* t = &state->thresholds;
+
+    if(metric == TB_METRIC_FPS)
     {
-        int tmp = text;
-        text = outline;
-        outline = tmp;
+        if(value < (double)t->fps_alert)
+            return TB_SEVERITY_ALERT;
+
+        if(t->fps_warn > t->fps_alert && value < (double)t->fps_warn)
+            return TB_SEVERITY_WARNING;
+
+        return TB_SEVERITY_OK;
     }
 
-    int graph = text;
-    int graph_score = -1;
-    for(int i = 0; i < TIC_PALETTE_SIZE; i++)
+    if(metric == TB_METRIC_MEM)
     {
-        if(i == text || i == outline) continue;
-        int dist_text = tb_rgb_dist_sq(&colors[i], &colors[text]);
-        int dist_outline = tb_rgb_dist_sq(&colors[i], &colors[outline]);
-        int score = dist_text < dist_outline ? dist_text : dist_outline;
-        if(score > graph_score)
-        {
-            graph_score = score;
-            graph = i;
-        }
+        if(value > (double)t->mem_alert_kb)
+            return TB_SEVERITY_ALERT;
+
+        if(t->mem_warn_kb < t->mem_alert_kb && value > (double)t->mem_warn_kb)
+            return TB_SEVERITY_WARNING;
+
+        return TB_SEVERITY_OK;
     }
 
-    if(out_text) *out_text = text;
-    if(out_outline) *out_outline = outline;
-    if(out_graph) *out_graph = graph;
+    if(value > (double)t->cycles_alert_kc)
+        return TB_SEVERITY_ALERT;
+
+    if(t->cycles_warn_kc < t->cycles_alert_kc && value > (double)t->cycles_warn_kc)
+        return TB_SEVERITY_WARNING;
+
+    return TB_SEVERITY_OK;
+}
+
+static u8 tb_graph_color_for_severity(tb_perf_severity severity, u8 ok, u8 warning, u8 alert)
+{
+    if(severity == TB_SEVERITY_ALERT) return alert;
+    if(severity == TB_SEVERITY_WARNING) return warning;
+    return ok;
 }
 
 static void tb_print_outline(tic_mem* tic, const char* text, s32 x, s32 y, u8 outline_color)
@@ -291,7 +498,16 @@ static void tb_draw_line_shadow(tic_mem* tic, s32 x0, s32 y0, s32 x1, s32 y1, u8
     tb_draw_line(tic, x0, y0, x1, y1, line_color);
 }
 
-static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metric, s32 x, s32 y, u8 graph_color, u8 shadow_color)
+static void tb_draw_graph(
+    tic_mem* tic,
+    const tb_perf_hud_state* state,
+    int metric,
+    s32 x,
+    s32 y,
+    u8 graph_ok_color,
+    u8 graph_warning_color,
+    u8 graph_alert_color,
+    u8 shadow_color)
 {
     if(!tic || !state) return;
 
@@ -317,12 +533,19 @@ static void tb_draw_graph(tic_mem* tic, const tb_perf_hud_state* state, int metr
 
         double vmin = tb_graph_sample(state, metric, start);
         double vmax = vmin;
+        tb_perf_severity severity = tb_classify_metric(state, metric, vmin);
         for(uint32_t s = start + 1; s <= end; s++)
         {
             double v = tb_graph_sample(state, metric, s);
             if(v < vmin) vmin = v;
             if(v > vmax) vmax = v;
+
+            tb_perf_severity sample_severity = tb_classify_metric(state, metric, v);
+            if(sample_severity > severity)
+                severity = sample_severity;
         }
+
+        u8 graph_color = tb_graph_color_for_severity(severity, graph_ok_color, graph_warning_color, graph_alert_color);
 
         double nmax = vmax / peak;
         double nmin = vmin / peak;
@@ -378,17 +601,53 @@ void ticbuild_perf_hud_init(tb_perf_hud_state* state)
     state->graph_height = TB_PERF_GRAPH_HEIGHT_DEFAULT;
     for(int i = 0; i < TB_PERF_METRIC_COUNT; i++)
         state->graph_peak[i] = 1.0;
-    state->palette_text = -1;
-    state->palette_outline = -1;
-    state->palette_graph = -1;
+    tb_set_color_spec_default(&state->palette_text, &TB_COLOR_TEXT_DEFAULT);
+    tb_set_color_spec_default(&state->palette_outline, &TB_COLOR_OUTLINE_DEFAULT);
+    tb_set_color_spec_default(&state->palette_ok, &TB_COLOR_OK_DEFAULT);
+    tb_set_color_spec_default(&state->palette_warning, &TB_COLOR_WARNING_DEFAULT);
+    tb_set_color_spec_default(&state->palette_alert, &TB_COLOR_ALERT_DEFAULT);
+
+    state->thresholds.fps_warn = 57;
+    state->thresholds.fps_alert = 53;
+    state->thresholds.mem_warn_kb = 102400;
+    state->thresholds.mem_alert_kb = 256000;
+    state->thresholds.cycles_warn_kc = 1800;
+    state->thresholds.cycles_alert_kc = 2400;
 }
 
-void ticbuild_perf_hud_set_palette_override(tb_perf_hud_state* state, int text, int outline, int graph)
+void ticbuild_perf_hud_set_palette_override(
+    tb_perf_hud_state* state,
+    const char* text,
+    const char* outline,
+    const char* ok,
+    const char* warning,
+    const char* alert)
 {
     if(!state) return;
-    state->palette_text = (text >= 0 && text < TIC_PALETTE_SIZE) ? text : -1;
-    state->palette_outline = (outline >= 0 && outline < TIC_PALETTE_SIZE) ? outline : -1;
-    state->palette_graph = (graph >= 0 && graph < TIC_PALETTE_SIZE) ? graph : -1;
+    tb_parse_color_spec(text, &TB_COLOR_TEXT_DEFAULT, &state->palette_text);
+    tb_parse_color_spec(outline, &TB_COLOR_OUTLINE_DEFAULT, &state->palette_outline);
+    tb_parse_color_spec(ok, &TB_COLOR_OK_DEFAULT, &state->palette_ok);
+    tb_parse_color_spec(warning, &TB_COLOR_WARNING_DEFAULT, &state->palette_warning);
+    tb_parse_color_spec(alert, &TB_COLOR_ALERT_DEFAULT, &state->palette_alert);
+}
+
+void ticbuild_perf_hud_set_thresholds(
+    tb_perf_hud_state* state,
+    int fps_warn,
+    int fps_alert,
+    int mem_warn_kb,
+    int mem_alert_kb,
+    int cycles_warn_kc,
+    int cycles_alert_kc)
+{
+    if(!state) return;
+
+    state->thresholds.fps_warn = fps_warn;
+    state->thresholds.fps_alert = fps_alert;
+    state->thresholds.mem_warn_kb = mem_warn_kb;
+    state->thresholds.mem_alert_kb = mem_alert_kb;
+    state->thresholds.cycles_warn_kc = cycles_warn_kc;
+    state->thresholds.cycles_alert_kc = cycles_alert_kc;
 }
 
 void ticbuild_perf_hud_adjust_graph_speed(tb_perf_hud_state* state, int delta)
@@ -502,17 +761,16 @@ void ticbuild_perf_hud_draw(
     if(mode == TB_PERF_HUD_OFF)
         return;
 
-    int text_color = tic_color_white;
-    int outline_color = tic_color_black;
-    int graph_color = tic_color_light_grey;
-    tb_pick_palette(tic, &text_color, &outline_color, &graph_color);
-
-    if(state->palette_text >= 0) text_color = state->palette_text;
-    if(state->palette_outline >= 0) outline_color = state->palette_outline;
-    if(state->palette_graph >= 0) graph_color = state->palette_graph;
+    int text_color = tb_resolve_color_spec(tic, &state->palette_text);
+    int outline_color = tb_resolve_color_spec(tic, &state->palette_outline);
+    int ok_color = tb_resolve_color_spec(tic, &state->palette_ok);
+    int warning_color = tb_resolve_color_spec(tic, &state->palette_warning);
+    int alert_color = tb_resolve_color_spec(tic, &state->palette_alert);
 
     u8 outline_mapped = tb_map_color(tic, outline_color);
-    u8 graph_mapped = tb_map_color(tic, graph_color);
+    u8 graph_ok_mapped = tb_map_color(tic, ok_color);
+    u8 graph_warning_mapped = tb_map_color(tic, warning_color);
+    u8 graph_alert_mapped = tb_map_color(tic, alert_color);
 
     int graph_width = state->graph_width;
     int graph_height = state->graph_height;
@@ -588,12 +846,25 @@ void ticbuild_perf_hud_draw(
         s32 text_y = row_y + text_offset;
 
         if(draw_graphs)
-            tb_draw_graph(tic, state, metric, graph_x, row_y, graph_mapped, outline_mapped);
+            tb_draw_graph(
+                tic,
+                state,
+                metric,
+                graph_x,
+                row_y,
+                graph_ok_mapped,
+                graph_warning_mapped,
+                graph_alert_mapped,
+                outline_mapped);
 
         char padded_value[32];
         tb_pad_left(padded_value, sizeof padded_value, value_buf[metric], TB_PERF_VALUE_WIDTH_CHARS);
         tb_print_outline(tic, padded_value, value_x, text_y, outline_mapped);
-        tic_api_print(tic, padded_value, value_x, text_y, (u8)text_color, true, 1, true);
+        tb_perf_severity value_severity = tb_classify_metric(state, metric, state->display[metric]);
+        int value_color = ok_color;
+        if(value_severity == TB_SEVERITY_WARNING) value_color = warning_color;
+        if(value_severity == TB_SEVERITY_ALERT) value_color = alert_color;
+        tic_api_print(tic, padded_value, value_x, text_y, (u8)value_color, true, 1, true);
 
         const char* label = metric < TB_PERF_BUILTIN_METRICS
             ? labels_builtin[metric]

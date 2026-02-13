@@ -40,6 +40,24 @@ extern "C"
 
     typedef struct
     {
+        bool enabled;
+        int palette_index;
+        bool use_auto;
+        tic_rgb target;
+    } tb_perf_hud_color_spec;
+
+    typedef struct
+    {
+        int fps_warn;
+        int fps_alert;
+        int mem_warn_kb;
+        int mem_alert_kb;
+        int cycles_warn_kc;
+        int cycles_alert_kc;
+    } tb_perf_hud_thresholds;
+
+    typedef struct
+    {
         tb_fps_tracker fps;
 
         double ema[TB_PERF_METRIC_COUNT];
@@ -57,13 +75,31 @@ extern "C"
         uint64_t last_display_counter;
         bool ema_initialized[TB_PERF_METRIC_COUNT];
 
-        int palette_text;
-        int palette_outline;
-        int palette_graph;
+        tb_perf_hud_color_spec palette_text;
+        tb_perf_hud_color_spec palette_outline;
+        tb_perf_hud_color_spec palette_ok;
+        tb_perf_hud_color_spec palette_warning;
+        tb_perf_hud_color_spec palette_alert;
+
+        tb_perf_hud_thresholds thresholds;
     } tb_perf_hud_state;
 
     void ticbuild_perf_hud_init(tb_perf_hud_state* state);
-    void ticbuild_perf_hud_set_palette_override(tb_perf_hud_state* state, int text, int outline, int graph);
+    void ticbuild_perf_hud_set_palette_override(
+        tb_perf_hud_state* state,
+        const char* text,
+        const char* outline,
+        const char* ok,
+        const char* warning,
+        const char* alert);
+    void ticbuild_perf_hud_set_thresholds(
+        tb_perf_hud_state* state,
+        int fps_warn,
+        int fps_alert,
+        int mem_warn_kb,
+        int mem_alert_kb,
+        int cycles_warn_kc,
+        int cycles_alert_kc);
     void ticbuild_perf_hud_adjust_graph_speed(tb_perf_hud_state* state, int delta);
     int ticbuild_perf_hud_get_graph_speed(const tb_perf_hud_state* state);
 
