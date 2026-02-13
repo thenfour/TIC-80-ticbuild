@@ -26,6 +26,10 @@ void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms
 {
     (void)ctx; (void)tic_ms10; (void)scn_ms10; (void)bdr_ms10; (void)total_ms10;
 }
+void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes)
+{
+    (void)ctx; (void)tic_cycles; (void)scn_cycles; (void)bdr_cycles; (void)lua_gc_mem_bytes;
+}
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap) { (void)ctx; if(out && outcap) out[0] = '\0'; }
 bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx) { (void)ctx; return false; }
 
@@ -114,6 +118,12 @@ struct TicbuildRemoting
     uint32_t user_bdr_ms10;
     uint32_t user_total_ms10;
 
+    // Per-frame Lua perf metrics
+    uint64_t user_tic_cycles;
+    uint64_t user_scn_cycles;
+    uint64_t user_bdr_cycles;
+    uint64_t lua_gc_mem_bytes;
+
     bool wsa_started;
 
     tb_socket listen_sock;
@@ -134,6 +144,51 @@ static void tb_format_ms10(char* out, size_t cap, uint32_t ms10)
 {
     if(!out || cap == 0) return;
     snprintf(out, cap, "%u.%ums", (unsigned)(ms10 / 10), (unsigned)(ms10 % 10));
+}
+
+static void tb_format_ms10_value(char* out, size_t cap, uint32_t ms10)
+{
+    if(!out || cap == 0) return;
+    snprintf(out, cap, "%u.%u", (unsigned)(ms10 / 10), (unsigned)(ms10 % 10));
+}
+
+static void tb_trim_trailing_zeros(char* s)
+{
+    if(!s) return;
+
+    char* dot = strchr(s, '.');
+    if(!dot) return;
+
+    char* end = s + strlen(s) - 1;
+    while(end > dot && *end == '0')
+    {
+        *end = '\0';
+        --end;
+    }
+
+    if(end == dot)
+        *end = '\0';
+}
+
+static void tb_format_fps(char* out, size_t cap, const tb_fps_tracker* fps)
+{
+    if(!out || cap == 0) return;
+
+    double v = 0.0;
+    if(fps && fps->count > 0 && fps->sum_dt > 0 && fps->freq > 0)
+        v = ((double)fps->count * (double)fps->freq) / (double)fps->sum_dt;
+
+    snprintf(out, cap, "%.2f", v);
+    tb_trim_trailing_zeros(out);
+}
+
+static void tb_format_kb1(char* out, size_t cap, uint64_t bytes)
+{
+    if(!out || cap == 0) return;
+    uint64_t kb10 = (bytes * 10ULL + 512ULL) / 1024ULL;
+    unsigned long long whole = (unsigned long long)(kb10 / 10ULL);
+    unsigned long long frac = (unsigned long long)(kb10 % 10ULL);
+    snprintf(out, cap, "%llu.%llu", whole, frac);
 }
 
 void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq)
@@ -166,6 +221,23 @@ void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms
     }
 }
 
+void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes)
+{
+    if(!ctx) return;
+
+    if(ctx->user_tic_cycles != tic_cycles ||
+       ctx->user_scn_cycles != scn_cycles ||
+       ctx->user_bdr_cycles != bdr_cycles ||
+       ctx->lua_gc_mem_bytes != lua_gc_mem_bytes)
+    {
+        ctx->user_tic_cycles = tic_cycles;
+        ctx->user_scn_cycles = scn_cycles;
+        ctx->user_bdr_cycles = bdr_cycles;
+        ctx->lua_gc_mem_bytes = lua_gc_mem_bytes;
+        tb_mark_title_dirty(ctx);
+    }
+}
+
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap)
 {
     if(!out || outcap == 0) return;
@@ -191,15 +263,21 @@ void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, si
     }
 
     char ticbuf[32], scnbuf[32], bdrbuf[32], totbuf[32];
+    char luabuf[32];
     tb_format_ms10(ticbuf, sizeof ticbuf, ctx->user_tic_ms10);
     tb_format_ms10(scnbuf, sizeof scnbuf, ctx->user_scn_ms10);
     tb_format_ms10(bdrbuf, sizeof bdrbuf, ctx->user_bdr_ms10);
     tb_format_ms10(totbuf, sizeof totbuf, ctx->user_total_ms10);
+    tb_format_kb1(luabuf, sizeof luabuf, ctx->lua_gc_mem_bytes);
 
     snprintf(out, outcap,
-        "FPS: %d | TIC %s SCN %s BDR %s TOT %s | %s",
+        "FPS: %d | TIC %s SCN %s BDR %s TOT %s | VM TIC %llu SCN %llu BDR %llu | LUA %sKB | %s",
         tb_fps_get(&ctx->fps),
         ticbuf, scnbuf, bdrbuf, totbuf,
+        (unsigned long long)ctx->user_tic_cycles,
+        (unsigned long long)ctx->user_scn_cycles,
+        (unsigned long long)ctx->user_bdr_cycles,
+        luabuf,
         listen_state);
 }
 
@@ -1195,6 +1273,51 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
 
         char data[32];
         snprintf(data, sizeof data, "%d", ticbuild_remoting_get_fps(ctx));
+        tb_free_args(args, argc);
+        tb_send_response_str(client, id, true, data);
+        return;
+    }
+
+    if(strcmp(cmd, "perf") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> perf");
+            return;
+        }
+
+        char fpsbuf[32];
+        char ticbuf[32];
+        char scnbuf[32];
+        char bdrbuf[32];
+
+        tb_format_fps(fpsbuf, sizeof fpsbuf, &ctx->fps);
+        tb_format_ms10_value(ticbuf, sizeof ticbuf, ctx->user_tic_ms10);
+        tb_format_ms10_value(scnbuf, sizeof scnbuf, ctx->user_scn_ms10);
+        tb_format_ms10_value(bdrbuf, sizeof bdrbuf, ctx->user_bdr_ms10);
+
+        char data[512];
+        snprintf(data, sizeof data,
+            "client_count=%d,"
+            "fps=%s,"
+            "tic_ms=%s,"
+            "scn_ms=%s,"
+            "bdr_ms=%s,"
+            "tic_cycles=%llu,"
+            "scn_cycles=%llu,"
+            "bdr_cycles=%llu,"
+            "lua_gc_mem=%llu",
+            ctx->client_count,
+            fpsbuf,
+            ticbuf,
+            scnbuf,
+            bdrbuf,
+            (unsigned long long)ctx->user_tic_cycles,
+            (unsigned long long)ctx->user_scn_cycles,
+            (unsigned long long)ctx->user_bdr_cycles,
+            (unsigned long long)ctx->lua_gc_mem_bytes);
+
         tb_free_args(args, argc);
         tb_send_response_str(client, id, true, data);
         return;

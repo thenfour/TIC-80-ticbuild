@@ -1,6 +1,7 @@
 #include "ticbuild_remoting/user_timing.h"
 
 #include "core/core.h"
+#include "ticbuild_remoting/lua_perf.h"
 
 #include <string.h>
 
@@ -22,6 +23,14 @@ typedef struct
     u64 last_scn_ticks;
     u64 last_bdr_ticks;
     u64 last_total_ticks;
+
+    u64 cur_tic_cycles;
+    u64 cur_scn_cycles;
+    u64 cur_bdr_cycles;
+
+    u64 last_tic_cycles;
+    u64 last_scn_cycles;
+    u64 last_bdr_cycles;
 } tb_user_timing_slot;
 
 // we don't want to add a bunch of code to core.c, so we do our own bookkeeping.
@@ -79,18 +88,33 @@ static void timing_tick_wrapper(tic_mem* memory)
     slot->cur_scn_ticks = 0;
     slot->cur_bdr_ticks = 0;
 
+    slot->cur_tic_cycles = 0;
+    slot->cur_scn_cycles = 0;
+    slot->cur_bdr_cycles = 0;
+
+    ticbuild_lua_perf_install(memory);
+    ticbuild_lua_perf_reset_counter(memory);
+
     if(core && core->data && core->data->freq)
         slot->freq = core->data->freq(core->data->data);
 
     if(core && core->data && core->data->counter)
     {
         u64 t0 = core->data->counter(core->data->data);
+        u64 instr0 = ticbuild_lua_perf_get_counter(memory);
         slot->orig_tick(memory);
         u64 t1 = core->data->counter(core->data->data);
+        u64 instr1 = ticbuild_lua_perf_get_counter(memory);
         slot->cur_tic_ticks += (t1 - t0);
+        slot->cur_tic_cycles += (instr1 - instr0);
     }
     else
+    {
+        u64 instr0 = ticbuild_lua_perf_get_counter(memory);
         slot->orig_tick(memory);
+        u64 instr1 = ticbuild_lua_perf_get_counter(memory);
+        slot->cur_tic_cycles += (instr1 - instr0);
+    }
 }
 
 static void timing_scanline_wrapper(tic_mem* memory, s32 row, void* data)
@@ -104,12 +128,20 @@ static void timing_scanline_wrapper(tic_mem* memory, s32 row, void* data)
     if(core && core->data && core->data->counter)
     {
         u64 t0 = core->data->counter(core->data->data);
+        u64 instr0 = ticbuild_lua_perf_get_counter(memory);
         slot->orig_scanline(memory, row, data);
         u64 t1 = core->data->counter(core->data->data);
+        u64 instr1 = ticbuild_lua_perf_get_counter(memory);
         slot->cur_scn_ticks += (t1 - t0);
+        slot->cur_scn_cycles += (instr1 - instr0);
     }
     else
+    {
+        u64 instr0 = ticbuild_lua_perf_get_counter(memory);
         slot->orig_scanline(memory, row, data);
+        u64 instr1 = ticbuild_lua_perf_get_counter(memory);
+        slot->cur_scn_cycles += (instr1 - instr0);
+    }
 }
 
 static void timing_border_wrapper(tic_mem* memory, s32 row, void* data)
@@ -123,12 +155,20 @@ static void timing_border_wrapper(tic_mem* memory, s32 row, void* data)
     if(core && core->data && core->data->counter)
     {
         u64 t0 = core->data->counter(core->data->data);
+        u64 instr0 = ticbuild_lua_perf_get_counter(memory);
         slot->orig_border(memory, row, data);
         u64 t1 = core->data->counter(core->data->data);
+        u64 instr1 = ticbuild_lua_perf_get_counter(memory);
         slot->cur_bdr_ticks += (t1 - t0);
+        slot->cur_bdr_cycles += (instr1 - instr0);
     }
     else
+    {
+        u64 instr0 = ticbuild_lua_perf_get_counter(memory);
         slot->orig_border(memory, row, data);
+        u64 instr1 = ticbuild_lua_perf_get_counter(memory);
+        slot->cur_bdr_cycles += (instr1 - instr0);
+    }
 }
 
 void ticbuild_user_timing_install(tic_mem* tic)
@@ -162,6 +202,8 @@ void ticbuild_user_timing_install(tic_mem* tic)
         slot->orig_border = core->state.callback.border;
         core->state.callback.border = timing_border_wrapper;
     }
+
+    ticbuild_lua_perf_install(tic);
 }
 
 void ticbuild_user_timing_end_frame(tic_mem* tic)
@@ -173,6 +215,10 @@ void ticbuild_user_timing_end_frame(tic_mem* tic)
     slot->last_scn_ticks = slot->cur_scn_ticks;
     slot->last_bdr_ticks = slot->cur_bdr_ticks;
     slot->last_total_ticks = slot->last_tic_ticks + slot->last_scn_ticks + slot->last_bdr_ticks;
+
+    slot->last_tic_cycles = slot->cur_tic_cycles;
+    slot->last_scn_cycles = slot->cur_scn_cycles;
+    slot->last_bdr_cycles = slot->cur_bdr_cycles;
 }
 
 bool ticbuild_user_timing_get_last_ms10(
@@ -195,6 +241,27 @@ bool ticbuild_user_timing_get_last_ms10(
     if(scn_ms10) *scn_ms10 = ticks_to_ms10(slot->last_scn_ticks, slot->freq);
     if(bdr_ms10) *bdr_ms10 = ticks_to_ms10(slot->last_bdr_ticks, slot->freq);
     if(total_ms10) *total_ms10 = ticks_to_ms10(slot->last_total_ticks, slot->freq);
+
+    return true;
+}
+
+bool ticbuild_user_timing_get_last_cycles(
+    tic_mem* tic,
+    uint64_t* tic_cycles,
+    uint64_t* scn_cycles,
+    uint64_t* bdr_cycles)
+{
+    if(tic_cycles) *tic_cycles = 0;
+    if(scn_cycles) *scn_cycles = 0;
+    if(bdr_cycles) *bdr_cycles = 0;
+
+    tb_user_timing_slot* slot = get_slot(tic, false);
+    if(!slot)
+        return false;
+
+    if(tic_cycles) *tic_cycles = slot->last_tic_cycles;
+    if(scn_cycles) *scn_cycles = slot->last_scn_cycles;
+    if(bdr_cycles) *bdr_cycles = slot->last_bdr_cycles;
 
     return true;
 }

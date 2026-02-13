@@ -47,6 +47,9 @@ int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx);
 // per-frame time spent in user callbacks, in 0.1ms units.
 void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms10, uint32_t scn_ms10, uint32_t bdr_ms10, uint32_t total_ms10);
 
+// per-frame Lua VM instruction counts + GC memory bytes.
+void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes);
+
 // Builds a short status string suitable for the window title, e.g.
 // `FPS: 60 | listening on 127.0.0.1:9977`.
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap);

@@ -27,6 +27,13 @@ extern "C"
         uint32_t* bdr_ms10,
         uint32_t* total_ms10);
 
+    // returns false if unavailable.
+    bool ticbuild_user_timing_get_last_cycles(
+        tic_mem* tic,
+        uint64_t* tic_cycles,
+        uint64_t* scn_cycles,
+        uint64_t* bdr_cycles);
+
 #ifdef __cplusplus
 }
 #endif

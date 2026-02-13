@@ -61,10 +61,12 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       `evelexpr "(function() ... end)()"`.
     - `listglobals` - returns a single-line, comma-separated list of eval-able
       global symbols (identifier keys from the Lua global environment).
+    - `typeschema <symbol>` - returns a type schema of the specified global symbol. see below.
     - `getfps` - gets current FPS
     - `cartpath` - returns the full path to the currently open cartridge.
       empty string if there's no open cart.
     - `fs` - returns the current filesystem local path (the one you can control via command line `--fs=...`)
+    - `perf` - returns current live performance metrics. see below for response
     - `metadata <key>` - returns the value for the metadata value in code.
       See: https://github.com/nesbox/TIC-80/wiki/Cartridge-Metadata.
   - datatypes
@@ -96,6 +98,22 @@ binds to `127.0.0.1`. Up to 10 clients supported.
 - Commands to be queued and executed at a deterministic safe point in the
   TIC-80 system loop (e.g., between frames if the cart is running)
 
+# `perf` command
+
+returns a single-line, comma-separated, `key=value` pairs.
+
+## keys
+
+- `client_count` integer; number of clients connected to remoting
+- `fps` fps, floating-point (e.g. `59.95`, `60`)
+- `tic_ms` time spent in TIC, floating-point.
+- `scn_ms`
+- `bdr_ms`
+- `tic_cycles` number of Lua VM cycles spent in TIC. integral.
+- `scn_cycles`
+- `bdr_cycles`
+- `lua_gc_mem` - lua's gc memory usage, in bytes (integral)
+
 # Discovery Protocol
 
 When the remoting server is listening, we will make the server discoverable by
@@ -126,6 +144,21 @@ remote session file.
 `tic80.exe --remote-session-location=c:\my\folder`
 
 will write the discovery file as `c:\my\folder\tic80-remote.<pid>.json`
+
+# `typeschema <symbol>`
+
+Returns the type schema of the specified global symbol. For simple values it's
+the same as Lua's keyword `type(x)`. So it can return:
+
+- `string`
+- `number`
+- `function`
+- `boolean`
+- `nil`
+
+However for tables
+
+- `table`
 
 # code structure
 

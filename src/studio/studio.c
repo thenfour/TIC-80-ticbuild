@@ -42,6 +42,7 @@
 #include "net.h"
 #include "ticbuild_remoting/remoting.h"
 #include "ticbuild_remoting/user_timing.h"
+#include "ticbuild_remoting/lua_perf.h"
 #include "wave_writer.h"
 #include "ext/gif.h"
 #define MSF_GIF_IMPL
@@ -2787,6 +2788,8 @@ void studio_tick(Studio* studio, tic80_input input)
         if(studio->remoting)
         {
             uint32_t tic_ms10 = 0, scn_ms10 = 0, bdr_ms10 = 0, tot_ms10 = 0;
+            uint64_t tic_cycles = 0, scn_cycles = 0, bdr_cycles = 0;
+            uint64_t lua_mem_bytes = 0;
 
             // Finalize timing for the frame that was just rendered.
             // Only meaningful in RUN mode; otherwise avoid showing stale values.
@@ -2794,9 +2797,12 @@ void studio_tick(Studio* studio, tic80_input input)
             {
                 ticbuild_user_timing_end_frame(tic);
                 ticbuild_user_timing_get_last_ms10(tic, &tic_ms10, &scn_ms10, &bdr_ms10, &tot_ms10);
+                ticbuild_user_timing_get_last_cycles(tic, &tic_cycles, &scn_cycles, &bdr_cycles);
+                lua_mem_bytes = ticbuild_lua_perf_get_mem_bytes(tic);
             }
 
             ticbuild_remoting_set_user_time_ms10(studio->remoting, tic_ms10, scn_ms10, bdr_ms10, tot_ms10);
+            ticbuild_remoting_set_lua_perf(studio->remoting, tic_cycles, scn_cycles, bdr_cycles, lua_mem_bytes);
             ticbuild_remoting_on_frame(studio->remoting, tic_sys_counter_get(), tic_sys_freq_get());
 
             if(ticbuild_remoting_take_title_dirty(studio->remoting)) {

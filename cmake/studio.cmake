@@ -29,6 +29,7 @@ if(BUILD_EDITORS)
         ${TIC80LIB_DIR}/studio/net.c
         ${TIC80LIB_DIR}/ticbuild_remoting/fps.c
         ${TIC80LIB_DIR}/ticbuild_remoting/user_timing.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/lua_perf.c
         ${TIC80LIB_DIR}/ticbuild_remoting/remoting.c
         ${TIC80LIB_DIR}/ticbuild_remoting/discovery.c
         ${TIC80LIB_DIR}/ticbuild_remoting/lua_eval.c
