@@ -177,6 +177,25 @@ static void tb_sanitize_label(char* s)
     }
 }
 
+// TIC-80's lua env doesn't have a concept of filenames so it synthesizes
+// one. they appear like:
+// [string "-- title:   game title..."]:23
+// this strips that down to "main" so there's still a filename but it's more sane to look at
+// and doesn't pollute the profile output.
+static const char* tb_profiler_normalize_src(const lua_Debug* ar)
+{
+    if(!ar)
+        return "?";
+
+    if(ar->short_src[0] == '\0')
+        return "?";
+
+    if(strncmp(ar->short_src, "[string \"", 9) == 0)
+        return "main";
+
+    return ar->short_src;
+}
+
 static bool tb_profiler_append_sample(tb_lua_perf_slot* slot, const char* stack)
 {
     if(!slot || !stack || !stack[0]) return false;
@@ -221,7 +240,7 @@ static void tb_profiler_collect_sample(tb_lua_perf_slot* slot)
         if(!lua_getinfo(slot->lua, "nSl", &ar))
             break;
 
-        const char* src = ar.short_src[0] ? ar.short_src : "?";
+        const char* src = tb_profiler_normalize_src(&ar);
         int line = ar.currentline > 0 ? ar.currentline : ar.linedefined;
 
         if(ar.name && ar.name[0])
