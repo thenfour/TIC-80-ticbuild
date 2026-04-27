@@ -591,9 +591,9 @@ static bool remoting_lua_profiler_status(void* userdata, tb_text_buffer* out, ch
     if(!status.running)
         snprintf(data, sizeof data, "running=0");
     else if(status.mode == TB_LUA_PROFILER_MODE_WALLCLOCK)
-        snprintf(data, sizeof data, "running=1;mode=wallclock;instruction_interval=%u;wall_clock_period_micros=%u", status.instruction_interval, status.wall_clock_period_micros);
+        snprintf(data, sizeof data, "running=1;mode=wallclock;instruction_interval=%u;wall_clock_period_micros=%u;elapsed_seconds=%u", status.instruction_interval, status.wall_clock_period_micros, status.elapsed_seconds);
     else
-        snprintf(data, sizeof data, "running=1;mode=instructions;instruction_interval=%u", status.instruction_interval);
+        snprintf(data, sizeof data, "running=1;mode=instructions;instruction_interval=%u;elapsed_seconds=%u", status.instruction_interval, status.elapsed_seconds);
 
     return tb_text_buffer_append_cstr(out, data, err, errcap);
 }
@@ -2953,6 +2953,8 @@ void studio_tick(Studio* studio, tic80_input input)
 
         if(studio->remoting)
         {
+            tb_lua_profiler_status profiler_status;
+            ticbuild_lua_profiler_get_status(tic, &profiler_status);
             ticbuild_remoting_set_user_time_ms10(
                 studio->remoting,
                 studio->perfFrame.tic_ms10,
@@ -2965,6 +2967,7 @@ void studio_tick(Studio* studio, tic80_input input)
                 studio->perfFrame.scn_cycles,
                 studio->perfFrame.bdr_cycles,
                 studio->perfFrame.lua_mem_bytes);
+            ticbuild_remoting_set_profiler_state(studio->remoting, profiler_status.running, profiler_status.elapsed_seconds);
             ticbuild_remoting_on_frame(studio->remoting, counter, freq);
 
             if(ticbuild_remoting_take_title_dirty(studio->remoting))

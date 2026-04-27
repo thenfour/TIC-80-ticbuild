@@ -28,6 +28,7 @@ typedef struct
     tb_lua_profiler_mode mode;
     uint32_t instruction_interval;
     uint32_t wall_clock_period_micros;
+    uint64_t start_counter;
     uint64_t instruction_accum;
     uint64_t next_due_tick;
     char** samples;
@@ -118,6 +119,7 @@ static void tb_profiler_reset(tb_lua_profiler_session* profiler)
     profiler->mode = TB_LUA_PROFILER_MODE_OFF;
     profiler->instruction_interval = 0;
     profiler->wall_clock_period_micros = 0;
+    profiler->start_counter = 0;
     profiler->instruction_accum = 0;
     profiler->next_due_tick = 0;
 }
@@ -674,8 +676,15 @@ bool ticbuild_lua_profiler_start(
     slot->profiler.mode = parsed_mode;
     slot->profiler.instruction_interval = instruction_interval;
     slot->profiler.wall_clock_period_micros = wall_clock_period_micros;
+    slot->profiler.start_counter = 0;
     slot->profiler.instruction_accum = 0;
     slot->profiler.next_due_tick = 0;
+
+    {
+        uint64_t counter = 0;
+        if(tb_profiler_get_counter_info(slot, &counter, NULL))
+            slot->profiler.start_counter = counter;
+    }
 
     tb_refresh_hook(slot);
     return true;
@@ -720,5 +729,12 @@ bool ticbuild_lua_profiler_get_status(tic_mem* tic, tb_lua_profiler_status* out_
     out_status->mode = slot->profiler.mode;
     out_status->instruction_interval = slot->profiler.instruction_interval;
     out_status->wall_clock_period_micros = slot->profiler.wall_clock_period_micros;
+    if(slot->profiler.active && slot->profiler.start_counter != 0)
+    {
+        uint64_t counter = 0;
+        uint64_t freq = 0;
+        if(tb_profiler_get_counter_info(slot, &counter, &freq) && freq > 0 && counter >= slot->profiler.start_counter)
+            out_status->elapsed_seconds = (uint32_t)((counter - slot->profiler.start_counter) / freq);
+    }
     return true;
 }

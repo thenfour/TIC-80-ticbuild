@@ -30,6 +30,10 @@ void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, 
 {
     (void)ctx; (void)tic_cycles; (void)scn_cycles; (void)bdr_cycles; (void)lua_gc_mem_bytes;
 }
+void ticbuild_remoting_set_profiler_state(TicbuildRemoting* ctx, bool active, uint32_t elapsed_seconds)
+{
+    (void)ctx; (void)active; (void)elapsed_seconds;
+}
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap) { (void)ctx; if(out && outcap) out[0] = '\0'; }
 bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx) { (void)ctx; return false; }
 
@@ -85,6 +89,7 @@ struct TicbuildRemoting
 
     tb_title_stats titleStats;
     bool profiler_active;
+    uint32_t profiler_elapsed_seconds;
 
     // Title/status tracking
     bool title_dirty;
@@ -134,6 +139,18 @@ void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, 
     tb_title_stats_set_lua_perf(&ctx->titleStats, tic_cycles, scn_cycles, bdr_cycles, lua_gc_mem_bytes);
 }
 
+void ticbuild_remoting_set_profiler_state(TicbuildRemoting* ctx, bool active, uint32_t elapsed_seconds)
+{
+    if(!ctx) return;
+
+    if(ctx->profiler_active != active || ctx->profiler_elapsed_seconds != elapsed_seconds)
+    {
+        ctx->profiler_active = active;
+        ctx->profiler_elapsed_seconds = elapsed_seconds;
+        tb_mark_title_dirty(ctx);
+    }
+}
+
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap)
 {
     if(!out || outcap == 0) return;
@@ -159,29 +176,27 @@ void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, si
     }
 
     if(ctx->profiler_active)
-        snprintf(out, outcap, "%s | PROFILING...", listen_state);
+        snprintf(out, outcap, "%s | PROFILING... %us", listen_state, (unsigned)ctx->profiler_elapsed_seconds);
     else
         snprintf(out, outcap, "%s", listen_state);
-}
-
-static void tb_set_profiler_active(TicbuildRemoting* ctx, bool active)
-{
-    if(!ctx) return;
-    if(ctx->profiler_active != active)
-    {
-        ctx->profiler_active = active;
-        tb_mark_title_dirty(ctx);
-    }
 }
 
 static void tb_sync_profiler_active_from_status(TicbuildRemoting* ctx, const char* status)
 {
     if(!ctx || !status) return;
 
-    if(strncmp(status, "running=1", 9) == 0)
-        tb_set_profiler_active(ctx, true);
-    else if(strncmp(status, "running=0", 9) == 0)
-        tb_set_profiler_active(ctx, false);
+    const char* running = strstr(status, "running=");
+    const char* elapsed = strstr(status, "elapsed_seconds=");
+    bool active = false;
+    uint32_t elapsed_seconds = 0;
+
+    if(running && running[8] == '1')
+        active = true;
+
+    if(elapsed)
+        elapsed_seconds = (uint32_t)strtoul(elapsed + 16, NULL, 10);
+
+    ticbuild_remoting_set_profiler_state(ctx, active, elapsed_seconds);
 }
 
 bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx)
@@ -1053,7 +1068,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         bool ok = ctx->cb.lua_profiler_start(ctx->cb.userdata, args[0].v.s.ptr, (uint32_t)args[1].v.i, (uint32_t)args[2].v.i, err, sizeof err);
         tb_free_args(args, argc);
         if(ok)
-            tb_set_profiler_active(ctx, true);
+            ticbuild_remoting_set_profiler_state(ctx, true, 0);
         tb_send_response_str(client, id, ok, ok ? NULL : err);
         return;
     }
@@ -1080,7 +1095,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         bool ok = ctx->cb.lua_profiler_stop(ctx->cb.userdata, output_path, &out, err, sizeof err);
         tb_free_args(args, argc);
         if(ok)
-            tb_set_profiler_active(ctx, false);
+            ticbuild_remoting_set_profiler_state(ctx, false, 0);
         tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
         tb_text_buffer_dispose(&out);
         return;

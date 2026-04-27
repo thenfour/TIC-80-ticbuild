@@ -259,7 +259,7 @@ Notes:
 
 Once profiling is started, the title bar will indicate that profiling is active.
 
-`TIC-80 | 60/60 fps | 55 + 3 = 58 kcyc | 1.2 ms | 100 kb | listening on 127.0.0.1:55555 (1 client) | PROFILING...`
+`TIC-80 | 60/60 fps | 55 + 3 = 58 kcyc | 1.2 ms | 100 kb | listening on 127.0.0.1:55555 (1 client) | PROFILING... 12s`
 
 To stop profiling and collect the data, call
 
@@ -276,8 +276,8 @@ examples:
 
 ```
 running=0
-running=1;mode=instructions;instruction_interval=1000
-running=1;mode=wallclock;instruction_interval=1000;wall_clock_period_micros=10
+running=1;mode=instructions;instruction_interval=1000;elapsed_seconds=12
+running=1;mode=wallclock;instruction_interval=1000;wall_clock_period_micros=10;elapsed_seconds=12
 ```
 
 ## `instructions` vs. `wallclock` mode

@@ -29,6 +29,7 @@ extern "C"
         tb_lua_profiler_mode mode;
         uint32_t instruction_interval;
         uint32_t wall_clock_period_micros;
+        uint32_t elapsed_seconds;
     } tb_lua_profiler_status;
 
     typedef struct

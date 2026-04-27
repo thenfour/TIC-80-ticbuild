@@ -55,6 +55,9 @@ extern "C"
     // per-frame Lua VM instruction counts + GC memory bytes.
     void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes);
 
+    // profiler state for remoting title/status reporting.
+    void ticbuild_remoting_set_profiler_state(TicbuildRemoting* ctx, bool active, uint32_t elapsed_seconds);
+
     // Builds a short remoting status string suitable for appending to the window title.
     void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap);
 
