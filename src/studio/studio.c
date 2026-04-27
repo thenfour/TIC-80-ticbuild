@@ -506,6 +506,97 @@ static bool remoting_metadata(void* userdata, const char* key, tb_text_buffer* o
 
     return tb_text_buffer_append_quoted(out, value ? value : "", strlen(value ? value : ""), err, errcap);
 }
+
+static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "lua profiler not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(!script_config || !script_config->name || strcmp(script_config->name, "lua") != 0)
+    {
+        if(err && errcap) { strncpy(err, "lua profiler only supported for lua", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    return ticbuild_lua_profiler_start(studio->tic, mode, instruction_interval, wall_clock_period_micros, err, errcap);
+}
+
+static bool remoting_lua_profiler_stop(void* userdata, const char* output_path, tb_text_buffer* out, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "lua profiler not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(!script_config || !script_config->name || strcmp(script_config->name, "lua") != 0)
+    {
+        if(err && errcap) { strncpy(err, "lua profiler only supported for lua", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out)
+    {
+        tb_set_err(err, errcap, "missing output buffer");
+        return false;
+    }
+
+    char saved_path[512];
+    if(!ticbuild_lua_profiler_stop(studio->tic, output_path, saved_path, sizeof saved_path, err, errcap))
+        return false;
+
+    return tb_text_buffer_append_quoted(out, saved_path, strlen(saved_path), err, errcap);
+}
+
+static bool remoting_lua_profiler_status(void* userdata, tb_text_buffer* out, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(!studio || !studio->tic)
+    {
+        if(err && errcap) { strncpy(err, "lua profiler not available", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    const tic_script* script_config = tic_get_script(studio->tic);
+    if(!script_config || !script_config->name || strcmp(script_config->name, "lua") != 0)
+    {
+        if(err && errcap) { strncpy(err, "lua profiler only supported for lua", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
+
+    if(!out)
+    {
+        tb_set_err(err, errcap, "missing output buffer");
+        return false;
+    }
+
+    tb_lua_profiler_status status;
+    if(!ticbuild_lua_profiler_get_status(studio->tic, &status))
+    {
+        tb_set_err(err, errcap, "failed to get profiler status");
+        return false;
+    }
+
+    char data[256];
+    if(!status.running)
+        snprintf(data, sizeof data, "running=0");
+    else if(status.mode == TB_LUA_PROFILER_MODE_WALLCLOCK)
+        snprintf(data, sizeof data, "running=1;mode=wallclock;instruction_interval=%u;wall_clock_period_micros=%u", status.instruction_interval, status.wall_clock_period_micros);
+    else
+        snprintf(data, sizeof data, "running=1;mode=instructions;instruction_interval=%u", status.instruction_interval);
+
+    return tb_text_buffer_append_cstr(out, data, err, errcap);
+}
 #endif
 
 void fadePalette(tic_palette* pal, s32 value)
@@ -3378,6 +3469,9 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .cart_path = remoting_cart_path,
             .fs_path = remoting_fs_path,
             .metadata = remoting_metadata,
+            .lua_profiler_start = remoting_lua_profiler_start,
+            .lua_profiler_stop = remoting_lua_profiler_stop,
+            .lua_profiler_status = remoting_lua_profiler_status,
         };
 
         studio->remoting = ticbuild_remoting_create(studio->remotingPort, args.remoteSessionLocation, args.globalDiscoEnabled, &cb);

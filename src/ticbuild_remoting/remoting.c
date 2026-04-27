@@ -84,6 +84,7 @@ struct TicbuildRemoting
     bool global_disco;
 
     tb_title_stats titleStats;
+    bool profiler_active;
 
     // Title/status tracking
     bool title_dirty;
@@ -157,7 +158,30 @@ void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, si
         listen_state = "remoting not listening";
     }
 
-    snprintf(out, outcap, "%s", listen_state);
+    if(ctx->profiler_active)
+        snprintf(out, outcap, "%s | PROFILING...", listen_state);
+    else
+        snprintf(out, outcap, "%s", listen_state);
+}
+
+static void tb_set_profiler_active(TicbuildRemoting* ctx, bool active)
+{
+    if(!ctx) return;
+    if(ctx->profiler_active != active)
+    {
+        ctx->profiler_active = active;
+        tb_mark_title_dirty(ctx);
+    }
+}
+
+static void tb_sync_profiler_active_from_status(TicbuildRemoting* ctx, const char* status)
+{
+    if(!ctx || !status) return;
+
+    if(strncmp(status, "running=1", 9) == 0)
+        tb_set_profiler_active(ctx, true);
+    else if(strncmp(status, "running=0", 9) == 0)
+        tb_set_profiler_active(ctx, false);
 }
 
 bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx)
@@ -1007,6 +1031,85 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
 
         tb_free_args(args, argc);
         tb_send_response_str(client, id, true, data);
+        return;
+    }
+
+    if(strcmp(cmd, "lua_profiler_start") == 0)
+    {
+        if(argc != 3 || args[0].type != TB_ARG_STR || args[1].type != TB_ARG_INT || args[2].type != TB_ARG_INT)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> lua_profiler_start \"mode\" <instructionInterval> <wallClockPeriodMicros>");
+            return;
+        }
+
+        if(!ctx->cb.lua_profiler_start)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "lua_profiler_start not supported");
+            return;
+        }
+
+        bool ok = ctx->cb.lua_profiler_start(ctx->cb.userdata, args[0].v.s.ptr, (uint32_t)args[1].v.i, (uint32_t)args[2].v.i, err, sizeof err);
+        tb_free_args(args, argc);
+        if(ok)
+            tb_set_profiler_active(ctx, true);
+        tb_send_response_str(client, id, ok, ok ? NULL : err);
+        return;
+    }
+
+    if(strcmp(cmd, "lua_profiler_stop") == 0)
+    {
+        if(argc > 1 || (argc == 1 && args[0].type != TB_ARG_STR))
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> lua_profiler_stop [\"output_path\"]");
+            return;
+        }
+
+        if(!ctx->cb.lua_profiler_stop)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "lua_profiler_stop not supported");
+            return;
+        }
+
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        const char* output_path = argc == 1 ? args[0].v.s.ptr : NULL;
+        bool ok = ctx->cb.lua_profiler_stop(ctx->cb.userdata, output_path, &out, err, sizeof err);
+        tb_free_args(args, argc);
+        if(ok)
+            tb_set_profiler_active(ctx, false);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
+        return;
+    }
+
+    if(strcmp(cmd, "lua_profiler_status") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> lua_profiler_status");
+            return;
+        }
+
+        if(!ctx->cb.lua_profiler_status)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "lua_profiler_status not supported");
+            return;
+        }
+
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        bool ok = ctx->cb.lua_profiler_status(ctx->cb.userdata, &out, err, sizeof err);
+        tb_free_args(args, argc);
+        if(ok)
+            tb_sync_profiler_active_from_status(ctx, tb_text_buffer_data(&out));
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
         return;
     }
 

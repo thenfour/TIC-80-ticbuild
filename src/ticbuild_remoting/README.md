@@ -114,6 +114,12 @@ binds to `127.0.0.1`. Up to 10 clients supported.
     - `perf` - returns current live performance metrics. see below for response
     - `metadata <key>` - returns the value for the metadata value in code.
       See: https://github.com/nesbox/TIC-80/wiki/Cartridge-Metadata.
+    - `lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros>` - Starts a
+      Lua performance profiling session. See below for performance profiler instructions.
+    - `lua_profiler_stop <output_path>`. Stops the profiler and writes the output to the optional
+      specified path (otherwise one is auto-generated)
+      See below for performance profiler instructions.
+    - `lua_profiler_status` - returns the status of the lua profiler
   - datatypes
     - numbers
       - Only integers for the moment. No fancy `1e3` forms, just:
@@ -228,3 +234,114 @@ However for tables
 
 changes to existing "official" TIC-80 code to be surgical and minimal. put our own
 sources under `/src/ticbuild_remoting`.
+
+# performance profiler
+
+Want to see which Lua functions or lines are causing performance issues? The
+following remoting commands can be used to record stack trace samples to eventually
+view in as a flame graph.
+
+`lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros>`
+
+Starts a Lua performance profiling session.
+
+- Mode can be:
+  - `instructions`: samples are collected every `<instructionInterval>` Lua instructions.
+  - `wallclock`: samples are collected every `<wallClockPeriodMicros>` microseconds
+    (1000 micros = 1 millisecond). Because of the way we sample the Lua runtime,
+    `<instructionInterval>` is still used here.
+
+Notes:
+
+- It is an error to start a session when one is already running
+- It is an error to stop a session when one is not running.
+- It is not defined how the profiler acts when reloading/stopping/pausing etc. Don't bother handling these scenarios explicitly; that's on the user.
+
+Once profiling is started, the title bar will indicate that profiling is active.
+
+`TIC-80 | 60/60 fps | 55 + 3 = 58 kcyc | 1.2 ms | 100 kb | listening on 127.0.0.1:55555 (1 client) | PROFILING...`
+
+To stop profiling and collect the data, call
+
+`lua_profiler_stop <output_path>`.
+
+Stops the profiler and writes the output to the specified path. If no path is specified,
+a temp path is chosen. The response will indicate the saved file path.
+
+`lua_profiler_status`
+
+returns the status of the lua profiler. single-line, comma-separated, `key=value` pairs.
+
+examples:
+
+```
+running=0
+running=1;mode=instructions;instruction_interval=1000
+running=1;mode=wallclock;instruction_interval=1000;wall_clock_period_micros=10
+```
+
+## `instructions` vs. `wallclock` mode
+
+Lua instructions are a host-agnostic way to measure performance. If you're working on a team
+of people with different computer specs, you cannot for example compare FPS values.
+In this case Lua instructions (or kcycles as in the title bar) is an objective cross-host
+metric.
+
+Just be aware that not all instructions are made equal, so there are cases where
+you optimize for kcycles but actual Windows host performance is worse.
+
+For profiling on your own machine against your own metrics during development,
+`wallclock` can be more useful. It measures the actual host time spent. So while
+it is the actual metric that says "this is running faster", it's not consistent because
+it depends on the environment: if another process is hogging CPU, or if you run
+in a VM etc, you cannot compare the values anymore.
+
+Further note about difficulties in measuring `wallclock`: we use `lua_getstack` and `lua_getinfo`,
+which cannot be run at arbitrary times. We therefore use `lua_sethook`, but this
+operates on a lua instruction count basis, not host clock. So in order to sample
+at host clock intervals, we use `lua_sethook` but on a tight-ish interval,
+and check if a sample is due. If not, return. If it's due, collect the sample.
+
+This means some kind of jitter can cause slight noise, but that's not expected
+to be an issue over thousands of collections.
+
+Jitter can even be a good thing in profiling because some natural code loops/cadences
+can accidentally line up with the sampling cadence. Apparently most profilers
+introduce some strategic jitter to ensure this is accounted for. Not sure our kind
+of jitter would be the good kind or not.
+
+## Stats collection
+
+We're going to collect stats in the least intrusive way possible. We are expecting
+a lot of hits for certain paths, so a map-like structure is expected here. Better
+to defer any processing (like mapping stack trace to symbols/source file:line etc)
+until when the session is ended, to avoid affecting runtime.
+
+As tempting as it is to introduce C++, let's stay in C for consistency.
+
+## Output format
+
+The output is a plain text file that can be imported to [speedscope](https://github.com/jlfwong/speedscope/).
+
+In particular the "Brendan Gregg" format is fine for us. Just line-based plain text,
+each line has a semi-colon delimited stack frames and integral sample count at the end.
+
+```
+main;a;b;c 1
+main;a;b;c 1
+main;a;b;d 4
+main;a;b;c 3
+main;a;b 5
+```
+
+## Integration with existing system
+
+`lua_sethook` I believe just handles one hook at a time. It's not some kind of hook chain;
+the interval needs to be chosen for the hook and the profiling hook will want
+a different cadence than the default hook.
+
+It means either we disable the exsiting perf hook during profiling, or we find a
+way to synergize. Disabling existing hook is impossible because it's important information
+even during profiling.
+
+The existing hook interval is `TB_LUA_HOOK_STEP = 1000`.

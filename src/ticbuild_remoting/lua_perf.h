@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "api.h"
@@ -14,6 +15,21 @@ extern "C"
         TB_LUA_PERF_USER_SLOT_COUNT = 4,
         TB_LUA_PERF_LABEL_MAX = 31,
     };
+
+    typedef enum
+    {
+        TB_LUA_PROFILER_MODE_OFF = 0,
+        TB_LUA_PROFILER_MODE_INSTRUCTIONS,
+        TB_LUA_PROFILER_MODE_WALLCLOCK,
+    } tb_lua_profiler_mode;
+
+    typedef struct
+    {
+        bool running;
+        tb_lua_profiler_mode mode;
+        uint32_t instruction_interval;
+        uint32_t wall_clock_period_micros;
+    } tb_lua_profiler_status;
 
     typedef struct
     {
@@ -52,6 +68,24 @@ extern "C"
     // Copies current user perf slots into `out_slots`.
     // If unavailable, writes defaults (inactive, zero value).
     void ticbuild_lua_perf_get_user_slots(tic_mem* tic, tb_lua_perf_user_slot out_slots[TB_LUA_PERF_USER_SLOT_COUNT]);
+
+    bool ticbuild_lua_profiler_start(
+        tic_mem* tic,
+        const char* mode,
+        uint32_t instruction_interval,
+        uint32_t wall_clock_period_micros,
+        char* err,
+        size_t errcap);
+
+    bool ticbuild_lua_profiler_stop(
+        tic_mem* tic,
+        const char* output_path,
+        char* saved_path,
+        size_t saved_path_cap,
+        char* err,
+        size_t errcap);
+
+    bool ticbuild_lua_profiler_get_status(tic_mem* tic, tb_lua_profiler_status* out_status);
 
 #ifdef __cplusplus
 }
