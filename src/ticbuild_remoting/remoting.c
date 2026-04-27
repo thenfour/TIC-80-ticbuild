@@ -90,12 +90,6 @@ struct TicbuildRemoting
     int last_client_count;
     char last_listen_err[128];
 
-    // Per-frame user callback timing (0.1ms fixed units)
-    uint32_t user_tic_ms10;
-    uint32_t user_scn_ms10;
-    uint32_t user_bdr_ms10;
-    uint32_t user_total_ms10;
-
     bool wsa_started;
 
     tb_socket listen_sock;
@@ -129,17 +123,7 @@ void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms
 {
     if(!ctx) return;
 
-    if(ctx->user_tic_ms10 != tic_ms10 ||
-       ctx->user_scn_ms10 != scn_ms10 ||
-       ctx->user_bdr_ms10 != bdr_ms10 ||
-       ctx->user_total_ms10 != total_ms10)
-    {
-        ctx->user_tic_ms10 = tic_ms10;
-        ctx->user_scn_ms10 = scn_ms10;
-        ctx->user_bdr_ms10 = bdr_ms10;
-        ctx->user_total_ms10 = total_ms10;
-        tb_mark_title_dirty(ctx);
-    }
+    tb_title_stats_set_user_time_ms10(&ctx->titleStats, tic_ms10, scn_ms10, bdr_ms10, total_ms10);
 }
 
 void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes)
@@ -983,21 +967,42 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         }
 
         char fpsbuf[32];
-        char data[512];
+        char ticmsbuf[32];
+        char scnmsbuf[32];
+        char bdrmsbuf[32];
+        char totalmsbuf[32];
+        char data[768];
+        uint64_t total_cycles = ctx->titleStats.tic_cycles + ctx->titleStats.scn_cycles + ctx->titleStats.bdr_cycles;
         tb_format_fps(fpsbuf, sizeof fpsbuf, &ctx->titleStats.fps);
+        tb_format_ms10_value(ticmsbuf, sizeof ticmsbuf, ctx->titleStats.tic_ms10);
+        tb_format_ms10_value(scnmsbuf, sizeof scnmsbuf, ctx->titleStats.scn_ms10);
+        tb_format_ms10_value(bdrmsbuf, sizeof bdrmsbuf, ctx->titleStats.bdr_ms10);
+        tb_format_ms10_value(totalmsbuf, sizeof totalmsbuf, ctx->titleStats.total_ms10);
 
         snprintf(data, sizeof data,
             "client_count=%d,"
             "fps=%s,"
+            "fps_uncapped=%d,"
+            "tic_ms=%s,"
+            "scn_ms=%s,"
+            "bdr_ms=%s,"
+            "total_ms=%s,"
             "tic_cycles=%llu,"
             "scn_cycles=%llu,"
             "bdr_cycles=%llu,"
+            "total_cycles=%llu,"
             "lua_gc_mem=%llu",
             ctx->client_count,
             fpsbuf,
+            tb_title_stats_get_uncapped_fps(&ctx->titleStats),
+            ticmsbuf,
+            scnmsbuf,
+            bdrmsbuf,
+            totalmsbuf,
             (unsigned long long)ctx->titleStats.tic_cycles,
             (unsigned long long)ctx->titleStats.scn_cycles,
             (unsigned long long)ctx->titleStats.bdr_cycles,
+            (unsigned long long)total_cycles,
             (unsigned long long)ctx->titleStats.lua_mem_bytes);
 
         tb_free_args(args, argc);

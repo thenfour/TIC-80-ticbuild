@@ -150,14 +150,22 @@ returns a single-line, comma-separated, `key=value` pairs.
 ## keys
 
 - `client_count` integer; number of clients connected to remoting
-- `fps` fps, floating-point (e.g. `59.95`, `60`)
-- `tic_ms` time spent in TIC, floating-point.
+- `fps` current capped FPS from the rolling window tracker, floating-point (e.g. `59.95`, `60`)
+- `fps_uncapped` estimated uncapped FPS derived from `total_ms`, integral.
+- `tic_ms` time spent in TIC, in milliseconds quantized to `0.1ms`.
 - `scn_ms`
 - `bdr_ms`
+- `total_ms` total time spent in TIC+SCN+BDR, in milliseconds quantized to `0.1ms`.
 - `tic_cycles` number of Lua VM cycles spent in TIC. integral.
 - `scn_cycles`
 - `bdr_cycles`
+- `total_cycles`
 - `lua_gc_mem` - lua's gc memory usage, in bytes (integral)
+
+Timing values are measured as fixed-point `ms10` internally, so all `*_ms` values
+are rounded to the nearest `0.1ms` before being exposed. `fps_uncapped` is
+derived from that quantized `total_ms` value, so it is approximate and becomes
+coarser at very high frame rates.
 
 # Discovery Protocol
 

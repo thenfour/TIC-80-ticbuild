@@ -28,6 +28,10 @@ extern "C"
 
     typedef struct
     {
+        uint32_t tic_ms10;
+        uint32_t scn_ms10;
+        uint32_t bdr_ms10;
+        uint32_t total_ms10;
         uint64_t tic_cycles;
         uint64_t scn_cycles;
         uint64_t bdr_cycles;
