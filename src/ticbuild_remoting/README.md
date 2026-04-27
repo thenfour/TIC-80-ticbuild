@@ -114,7 +114,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
     - `perf` - returns current live performance metrics. see below for response
     - `metadata <key>` - returns the value for the metadata value in code.
       See: https://github.com/nesbox/TIC-80/wiki/Cartridge-Metadata.
-    - `lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros>` - Starts a
+    - `lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros> <seconds?> <output_path?>` - Starts a
       Lua performance profiling session. See below for performance profiler instructions.
     - `lua_profiler_stop <output_path>`. Stops the profiler and writes the output to the optional
       specified path (otherwise one is auto-generated)
@@ -241,15 +241,29 @@ Want to see which Lua functions or lines are causing performance issues? The
 following remoting commands can be used to record stack trace samples to eventually
 view in as a flame graph.
 
-`lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros>`
+`lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros> <seconds?> <output_path?>`
 
 Starts a Lua performance profiling session.
 
-- Mode can be:
+- `mode` can be:
   - `instructions`: samples are collected every `<instructionInterval>` Lua instructions.
   - `wallclock`: samples are collected every `<wallClockPeriodMicros>` microseconds
     (1000 micros = 1 millisecond). Because of the way we sample the Lua runtime,
     `<instructionInterval>` is still used here.
+- `seconds` is optional and specifies the # of seconds to profile for. After this # of
+  seconds has elapsed, profiling stops automatically on the next regular update/frame poll.
+- `output_path` has the same semantics as `lua_profiler_stop`. Optional; and only
+  used when `seconds` is specified. If not specified, auto-stop will choose an auto
+  temp file path.
+
+When `seconds` is specified, the `lua_profiler_start` response includes the reserved
+save path immediately, for example:
+
+`auto_stop=1,duration=12,output_path="C:\\Users\\you\\AppData\\Local\\Temp\\tic80-lua-profiler-1234.txt"`
+
+When `seconds` is omitted, the response is:
+
+`auto_stop=0`
 
 Notes:
 
@@ -275,9 +289,9 @@ returns the status of the lua profiler. single-line, comma-separated, `key=value
 examples:
 
 ```
-running=0
-running=1;mode=instructions;instruction_interval=1000;elapsed_seconds=12
-running=1;mode=wallclock;instruction_interval=1000;wall_clock_period_micros=10;elapsed_seconds=12
+running=0,auto_stop=0
+running=1,auto_stop=0,mode=instructions,instruction_interval=1000,elapsed_seconds=12
+running=1,auto_stop=1,mode=wallclock,instruction_interval=1000,wall_clock_period_micros=10,elapsed_seconds=12,duration=30,remaining_seconds=18,output_path="C:\\Users\\you\\AppData\\Local\\Temp\\tic80-lua-profiler-1234.txt"
 ```
 
 ## `instructions` vs. `wallclock` mode

@@ -25,12 +25,16 @@ static void tb_lua_hook(lua_State* L, lua_Debug* ar);
 typedef struct
 {
     bool active;
+    bool auto_stop;
     tb_lua_profiler_mode mode;
     uint32_t instruction_interval;
     uint32_t wall_clock_period_micros;
+    uint32_t duration_seconds;
     uint64_t start_counter;
+    uint64_t stop_counter;
     uint64_t instruction_accum;
     uint64_t next_due_tick;
+    char output_path[TB_LUA_PROFILER_PATH_MAX];
     char** samples;
     size_t sample_count;
     size_t sample_cap;
@@ -54,6 +58,8 @@ typedef struct
 
     bool hook_installed;
 } tb_lua_perf_slot;
+
+static bool tb_profiler_get_counter_info(tb_lua_perf_slot* slot, uint64_t* out_counter, uint64_t* out_freq);
 
 // keep small; multiple cores are uncommon
 enum { SLOT_COUNT = 4 };
@@ -116,12 +122,29 @@ static void tb_profiler_reset(tb_lua_profiler_session* profiler)
 
     tb_profiler_clear_samples(profiler);
     profiler->active = false;
+    profiler->auto_stop = false;
     profiler->mode = TB_LUA_PROFILER_MODE_OFF;
     profiler->instruction_interval = 0;
     profiler->wall_clock_period_micros = 0;
+    profiler->duration_seconds = 0;
     profiler->start_counter = 0;
+    profiler->stop_counter = 0;
     profiler->instruction_accum = 0;
     profiler->next_due_tick = 0;
+    profiler->output_path[0] = '\0';
+}
+
+static uint32_t tb_profiler_get_elapsed_seconds(const tb_lua_perf_slot* slot)
+{
+    if(!slot || !slot->profiler.active || slot->profiler.start_counter == 0)
+        return 0;
+
+    uint64_t counter = 0;
+    uint64_t freq = 0;
+    if(!tb_profiler_get_counter_info((tb_lua_perf_slot*)slot, &counter, &freq) || freq == 0 || counter < slot->profiler.start_counter)
+        return 0;
+
+    return (uint32_t)((counter - slot->profiler.start_counter) / freq);
 }
 
 static tb_lua_profiler_mode tb_parse_profiler_mode(const char* mode)
@@ -383,6 +406,48 @@ static bool tb_profiler_default_output_path(char* out, size_t cap, char* err, si
     return true;
 }
 
+static bool tb_profiler_resolve_output_path(const char* output_path, char* out, size_t cap, char* err, size_t errcap)
+{
+    if(!out || cap == 0)
+    {
+        tb_set_err(err, errcap, "missing output buffer");
+        return false;
+    }
+
+    if(output_path && output_path[0])
+    {
+        int written = snprintf(out, cap, "%s", output_path);
+        if(written < 0 || (size_t)written >= cap)
+        {
+            tb_set_err(err, errcap, "output path too long");
+            return false;
+        }
+
+        return true;
+    }
+
+    return tb_profiler_default_output_path(out, cap, err, errcap);
+}
+
+static bool tb_profiler_touch_output_path(const char* path, char* err, size_t errcap)
+{
+    if(!path || !path[0])
+    {
+        tb_set_err(err, errcap, "missing output path");
+        return false;
+    }
+
+    FILE* file = fopen(path, "wb");
+    if(!file)
+    {
+        tb_set_err(err, errcap, "failed to open profiler output");
+        return false;
+    }
+
+    fclose(file);
+    return true;
+}
+
 static bool tb_profiler_write_output(tb_lua_perf_slot* slot, const char* output_path, char* saved_path, size_t saved_path_cap, char* err, size_t errcap)
 {
     if(!slot)
@@ -395,9 +460,12 @@ static bool tb_profiler_write_output(tb_lua_perf_slot* slot, const char* output_
     const char* path = output_path;
     if(!path || !path[0])
     {
-        if(!tb_profiler_default_output_path(path_buf, sizeof path_buf, err, errcap))
+        if(slot->profiler.output_path[0])
+            path = slot->profiler.output_path;
+        else if(!tb_profiler_resolve_output_path(NULL, path_buf, sizeof path_buf, err, errcap))
             return false;
-        path = path_buf;
+        else
+            path = path_buf;
     }
 
     FILE* file = fopen(path, "wb");
@@ -634,6 +702,10 @@ bool ticbuild_lua_profiler_start(
     const char* mode,
     uint32_t instruction_interval,
     uint32_t wall_clock_period_micros,
+    uint32_t duration_seconds,
+    const char* output_path,
+    char* saved_path,
+    size_t saved_path_cap,
     char* err,
     size_t errcap)
 {
@@ -656,6 +728,12 @@ bool ticbuild_lua_profiler_start(
         return false;
     }
 
+    if(duration_seconds == 0 && output_path && output_path[0])
+    {
+        tb_set_err(err, errcap, "output path requires auto-stop seconds");
+        return false;
+    }
+
     ticbuild_lua_perf_install(tic);
 
     tb_lua_perf_slot* slot = get_slot(tic, false);
@@ -671,20 +749,63 @@ bool ticbuild_lua_profiler_start(
         return false;
     }
 
+    char reserved_output_path[TB_LUA_PROFILER_PATH_MAX];
+    reserved_output_path[0] = '\0';
+
+    uint64_t start_counter = 0;
+    uint64_t freq = 0;
+    if(duration_seconds > 0)
+    {
+        if(!tb_profiler_resolve_output_path(output_path, reserved_output_path, sizeof reserved_output_path, err, errcap))
+            return false;
+
+        if(!tb_profiler_touch_output_path(reserved_output_path, err, errcap))
+            return false;
+
+        if(!tb_profiler_get_counter_info(slot, &start_counter, &freq))
+        {
+            tb_set_err(err, errcap, "auto-stop timer unavailable");
+            return false;
+        }
+    }
+
     tb_profiler_clear_samples(&slot->profiler);
     slot->profiler.active = true;
+    slot->profiler.auto_stop = duration_seconds > 0;
     slot->profiler.mode = parsed_mode;
     slot->profiler.instruction_interval = instruction_interval;
     slot->profiler.wall_clock_period_micros = wall_clock_period_micros;
+    slot->profiler.duration_seconds = duration_seconds;
     slot->profiler.start_counter = 0;
+    slot->profiler.stop_counter = 0;
     slot->profiler.instruction_accum = 0;
     slot->profiler.next_due_tick = 0;
+    slot->profiler.output_path[0] = '\0';
 
+    if(duration_seconds > 0)
     {
-        uint64_t counter = 0;
-        if(tb_profiler_get_counter_info(slot, &counter, NULL))
-            slot->profiler.start_counter = counter;
+        slot->profiler.start_counter = start_counter;
+        if(duration_seconds > 0 && freq > 0)
+        {
+            uint64_t duration_ticks = (uint64_t)duration_seconds;
+            if(duration_ticks > UINT64_MAX / freq)
+                duration_ticks = UINT64_MAX;
+            else
+                duration_ticks *= freq;
+
+            slot->profiler.stop_counter = start_counter > UINT64_MAX - duration_ticks ? UINT64_MAX : start_counter + duration_ticks;
+        }
+
+        strncpy(slot->profiler.output_path, reserved_output_path, sizeof slot->profiler.output_path - 1);
+        slot->profiler.output_path[sizeof slot->profiler.output_path - 1] = '\0';
+        if(saved_path && saved_path_cap > 0)
+        {
+            strncpy(saved_path, slot->profiler.output_path, saved_path_cap - 1);
+            saved_path[saved_path_cap - 1] = '\0';
+        }
     }
+    else if(tb_profiler_get_counter_info(slot, &start_counter, NULL))
+        slot->profiler.start_counter = start_counter;
 
     tb_refresh_hook(slot);
     return true;
@@ -714,6 +835,35 @@ bool ticbuild_lua_profiler_stop(
     return ok;
 }
 
+bool ticbuild_lua_profiler_tick(
+    tic_mem* tic,
+    char* saved_path,
+    size_t saved_path_cap,
+    char* err,
+    size_t errcap)
+{
+    tb_lua_perf_slot* slot = get_slot(tic, false);
+    if(!slot || !slot->profiler.active || !slot->profiler.auto_stop)
+        return true;
+
+    uint64_t counter = 0;
+    uint64_t freq = 0;
+    if(!tb_profiler_get_counter_info(slot, &counter, &freq) || freq == 0)
+        return true;
+
+    if(slot->profiler.stop_counter == 0 || counter < slot->profiler.stop_counter)
+        return true;
+
+    if(ticbuild_lua_profiler_stop(tic, NULL, saved_path, saved_path_cap, err, errcap))
+        return true;
+
+    slot->profiler.auto_stop = false;
+    slot->profiler.duration_seconds = 0;
+    slot->profiler.stop_counter = 0;
+    slot->profiler.output_path[0] = '\0';
+    return false;
+}
+
 bool ticbuild_lua_profiler_get_status(tic_mem* tic, tb_lua_profiler_status* out_status)
 {
     if(!out_status)
@@ -726,15 +876,19 @@ bool ticbuild_lua_profiler_get_status(tic_mem* tic, tb_lua_profiler_status* out_
         return true;
 
     out_status->running = slot->profiler.active;
+    out_status->auto_stop = slot->profiler.auto_stop;
     out_status->mode = slot->profiler.mode;
     out_status->instruction_interval = slot->profiler.instruction_interval;
     out_status->wall_clock_period_micros = slot->profiler.wall_clock_period_micros;
-    if(slot->profiler.active && slot->profiler.start_counter != 0)
+    out_status->duration_seconds = slot->profiler.duration_seconds;
+    out_status->elapsed_seconds = tb_profiler_get_elapsed_seconds(slot);
+    if(out_status->auto_stop)
     {
-        uint64_t counter = 0;
-        uint64_t freq = 0;
-        if(tb_profiler_get_counter_info(slot, &counter, &freq) && freq > 0 && counter >= slot->profiler.start_counter)
-            out_status->elapsed_seconds = (uint32_t)((counter - slot->profiler.start_counter) / freq);
+        out_status->remaining_seconds = out_status->elapsed_seconds >= out_status->duration_seconds
+            ? 0
+            : (out_status->duration_seconds - out_status->elapsed_seconds);
+        strncpy(out_status->output_path, slot->profiler.output_path, sizeof out_status->output_path - 1);
+        out_status->output_path[sizeof out_status->output_path - 1] = '\0';
     }
     return true;
 }

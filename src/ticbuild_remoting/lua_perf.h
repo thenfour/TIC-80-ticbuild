@@ -14,6 +14,7 @@ extern "C"
     {
         TB_LUA_PERF_USER_SLOT_COUNT = 4,
         TB_LUA_PERF_LABEL_MAX = 31,
+        TB_LUA_PROFILER_PATH_MAX = 512,
     };
 
     typedef enum
@@ -26,10 +27,14 @@ extern "C"
     typedef struct
     {
         bool running;
+        bool auto_stop;
         tb_lua_profiler_mode mode;
         uint32_t instruction_interval;
         uint32_t wall_clock_period_micros;
+        uint32_t duration_seconds;
+        uint32_t remaining_seconds;
         uint32_t elapsed_seconds;
+        char output_path[TB_LUA_PROFILER_PATH_MAX];
     } tb_lua_profiler_status;
 
     typedef struct
@@ -75,12 +80,23 @@ extern "C"
         const char* mode,
         uint32_t instruction_interval,
         uint32_t wall_clock_period_micros,
+        uint32_t duration_seconds,
+        const char* output_path,
+        char* saved_path,
+        size_t saved_path_cap,
         char* err,
         size_t errcap);
 
     bool ticbuild_lua_profiler_stop(
         tic_mem* tic,
         const char* output_path,
+        char* saved_path,
+        size_t saved_path_cap,
+        char* err,
+        size_t errcap);
+
+    bool ticbuild_lua_profiler_tick(
+        tic_mem* tic,
         char* saved_path,
         size_t saved_path_cap,
         char* err,

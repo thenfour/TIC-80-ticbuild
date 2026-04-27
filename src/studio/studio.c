@@ -507,7 +507,7 @@ static bool remoting_metadata(void* userdata, const char* key, tb_text_buffer* o
     return tb_text_buffer_append_quoted(out, value ? value : "", strlen(value ? value : ""), err, errcap);
 }
 
-static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, char* err, size_t errcap)
+static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, uint32_t duration_seconds, const char* output_path, tb_text_buffer* out, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
 
@@ -524,7 +524,26 @@ static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32
         return false;
     }
 
-    return ticbuild_lua_profiler_start(studio->tic, mode, instruction_interval, wall_clock_period_micros, err, errcap);
+    if(!out)
+    {
+        tb_set_err(err, errcap, "missing output buffer");
+        return false;
+    }
+
+    char saved_path[TB_LUA_PROFILER_PATH_MAX];
+    saved_path[0] = '\0';
+    if(!ticbuild_lua_profiler_start(studio->tic, mode, instruction_interval, wall_clock_period_micros, duration_seconds, output_path, saved_path, sizeof saved_path, err, errcap))
+        return false;
+
+    if(duration_seconds == 0)
+        return tb_text_buffer_append_cstr(out, "auto_stop=0", err, errcap);
+
+    char data[64];
+    snprintf(data, sizeof data, "auto_stop=1,duration=%u,output_path=", duration_seconds);
+    if(!tb_text_buffer_append_cstr(out, data, err, errcap))
+        return false;
+
+    return tb_text_buffer_append_quoted(out, saved_path, strlen(saved_path), err, errcap);
 }
 
 static bool remoting_lua_profiler_stop(void* userdata, const char* output_path, tb_text_buffer* out, char* err, size_t errcap)
@@ -589,13 +608,24 @@ static bool remoting_lua_profiler_status(void* userdata, tb_text_buffer* out, ch
 
     char data[256];
     if(!status.running)
-        snprintf(data, sizeof data, "running=0");
+        snprintf(data, sizeof data, "running=0,auto_stop=0");
     else if(status.mode == TB_LUA_PROFILER_MODE_WALLCLOCK)
-        snprintf(data, sizeof data, "running=1;mode=wallclock;instruction_interval=%u;wall_clock_period_micros=%u;elapsed_seconds=%u", status.instruction_interval, status.wall_clock_period_micros, status.elapsed_seconds);
+        snprintf(data, sizeof data, "running=1,auto_stop=%u,mode=wallclock,instruction_interval=%u,wall_clock_period_micros=%u,elapsed_seconds=%u", status.auto_stop ? 1u : 0u, status.instruction_interval, status.wall_clock_period_micros, status.elapsed_seconds);
     else
-        snprintf(data, sizeof data, "running=1;mode=instructions;instruction_interval=%u;elapsed_seconds=%u", status.instruction_interval, status.elapsed_seconds);
+        snprintf(data, sizeof data, "running=1,auto_stop=%u,mode=instructions,instruction_interval=%u,elapsed_seconds=%u", status.auto_stop ? 1u : 0u, status.instruction_interval, status.elapsed_seconds);
 
-    return tb_text_buffer_append_cstr(out, data, err, errcap);
+    if(!tb_text_buffer_append_cstr(out, data, err, errcap))
+        return false;
+
+    if(status.running && status.auto_stop)
+    {
+        snprintf(data, sizeof data, ",duration=%u,remaining_seconds=%u,output_path=", status.duration_seconds, status.remaining_seconds);
+        if(!tb_text_buffer_append_cstr(out, data, err, errcap))
+            return false;
+        return tb_text_buffer_append_quoted(out, status.output_path, strlen(status.output_path), err, errcap);
+    }
+
+    return true;
 }
 #endif
 
@@ -2950,6 +2980,17 @@ void studio_tick(Studio* studio, tic80_input input)
 
         if(tb_title_stats_take_dirty(&studio->titleStats))
             studio->title_pending = true;
+
+        {
+            char saved_path[TB_LUA_PROFILER_PATH_MAX];
+            char profiler_err[128];
+            saved_path[0] = '\0';
+            profiler_err[0] = '\0';
+            if(!ticbuild_lua_profiler_tick(tic, saved_path, sizeof saved_path, profiler_err, sizeof profiler_err))
+                printf("[remoting] lua profiler auto-stop failed: %s\n", profiler_err[0] ? profiler_err : "error");
+            else if(saved_path[0])
+                printf("[remoting] lua profiler auto-stop saved: %s\n", saved_path);
+        }
 
         if(studio->remoting)
         {

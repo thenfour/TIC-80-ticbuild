@@ -1051,10 +1051,12 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
 
     if(strcmp(cmd, "lua_profiler_start") == 0)
     {
-        if(argc != 3 || args[0].type != TB_ARG_STR || args[1].type != TB_ARG_INT || args[2].type != TB_ARG_INT)
+        if(argc < 3 || argc > 5 || args[0].type != TB_ARG_STR || args[1].type != TB_ARG_INT || args[2].type != TB_ARG_INT
+            || (argc >= 4 && args[3].type != TB_ARG_INT)
+            || (argc == 5 && args[4].type != TB_ARG_STR))
         {
             tb_free_args(args, argc);
-            tb_send_response_str(client, id, false, "usage: <id> lua_profiler_start \"mode\" <instructionInterval> <wallClockPeriodMicros>");
+            tb_send_response_str(client, id, false, "usage: <id> lua_profiler_start \"mode\" <instructionInterval> <wallClockPeriodMicros> [seconds [\"output_path\"]]");
             return;
         }
 
@@ -1065,11 +1067,16 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
             return;
         }
 
-        bool ok = ctx->cb.lua_profiler_start(ctx->cb.userdata, args[0].v.s.ptr, (uint32_t)args[1].v.i, (uint32_t)args[2].v.i, err, sizeof err);
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        uint32_t duration_seconds = argc >= 4 ? (uint32_t)args[3].v.i : 0;
+        const char* output_path = argc == 5 ? args[4].v.s.ptr : NULL;
+        bool ok = ctx->cb.lua_profiler_start(ctx->cb.userdata, args[0].v.s.ptr, (uint32_t)args[1].v.i, (uint32_t)args[2].v.i, duration_seconds, output_path, &out, err, sizeof err);
         tb_free_args(args, argc);
         if(ok)
             ticbuild_remoting_set_profiler_state(ctx, true, 0);
-        tb_send_response_str(client, id, ok, ok ? NULL : err);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
         return;
     }
 
