@@ -103,6 +103,8 @@ static bool tb_write_discovery_file(const char* dir, int port, const char* json,
     fwrite(json, 1, json_len, f);
     fclose(f);
 
+    printf("[remoting] discovery file written: %s\n", outpath);
+
     return true;
 }
 
