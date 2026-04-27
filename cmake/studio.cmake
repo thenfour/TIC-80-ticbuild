@@ -30,6 +30,7 @@ if(BUILD_EDITORS)
         ${TIC80LIB_DIR}/ticbuild_remoting/fps.c
         ${TIC80LIB_DIR}/ticbuild_remoting/user_timing.c
         ${TIC80LIB_DIR}/ticbuild_remoting/lua_perf.c
+        ${TIC80LIB_DIR}/ticbuild_remoting/title_stats.c
         ${TIC80LIB_DIR}/ticbuild_remoting/utils.c
         ${TIC80LIB_DIR}/ticbuild_remoting/perf_hud.c
         ${TIC80LIB_DIR}/ticbuild_remoting/remoting.c

@@ -41,6 +41,7 @@
 #include "ext/history.h"
 #include "net.h"
 #include "ticbuild_remoting/remoting.h"
+#include "ticbuild_remoting/title_stats.h"
 #include "ticbuild_remoting/utils.h"
 #include "ticbuild_remoting/fps.h"
 #include "ticbuild_remoting/perf_hud.h"
@@ -237,6 +238,7 @@ struct Studio
     tb_perf_hud_state perfHud;
     tb_perf_hud_mode perfHudMode;
     tb_perf_metrics perfFrame;
+    tb_title_stats titleStats;
     uint64_t title_last_counter;
     bool title_pending;
 
@@ -1778,6 +1780,18 @@ static void updateTitle(Studio* studio)
     if(strlen(studio->console->rom.name))
         snprintf(name, TICNAME_MAX, "%s [%s]", TIC_NAME, studio->console->rom.name);
 
+    {
+        char extra[256];
+        tb_title_stats_get_title_info(&studio->titleStats, extra, sizeof extra);
+        if(extra[0])
+        {
+            char full[TICNAME_MAX];
+            snprintf(full, TICNAME_MAX, "%s | %s", name, extra);
+            strncpy(name, full, TICNAME_MAX - 1);
+            name[TICNAME_MAX - 1] = '\0';
+        }
+    }
+
     if(studio->remoting)
     {
         char extra[256];
@@ -2825,6 +2839,20 @@ void studio_tick(Studio* studio, tic80_input input)
             }
         }
 
+        uint64_t counter = tic_sys_counter_get();
+        uint64_t freq = tic_sys_freq_get();
+
+        tb_title_stats_set_lua_perf(
+            &studio->titleStats,
+            studio->perfFrame.tic_cycles,
+            studio->perfFrame.scn_cycles,
+            studio->perfFrame.bdr_cycles,
+            studio->perfFrame.lua_mem_bytes);
+        tb_title_stats_on_frame(&studio->titleStats, counter, freq);
+
+        if(tb_title_stats_take_dirty(&studio->titleStats))
+            studio->title_pending = true;
+
         if(studio->remoting)
         {
             ticbuild_remoting_set_lua_perf(
@@ -2833,25 +2861,23 @@ void studio_tick(Studio* studio, tic80_input input)
                 studio->perfFrame.scn_cycles,
                 studio->perfFrame.bdr_cycles,
                 studio->perfFrame.lua_mem_bytes);
-            uint64_t counter = tic_sys_counter_get();
-            uint64_t freq = tic_sys_freq_get();
             ticbuild_remoting_on_frame(studio->remoting, counter, freq);
 
             if(ticbuild_remoting_take_title_dirty(studio->remoting))
                 studio->title_pending = true;
+        }
 
-            if(studio->title_pending)
+        if(studio->title_pending)
+        {
+            uint64_t interval = freq > 0 ? (freq / STUDIO_TITLE_UPDATE_HZ) : STUDIO_TITLE_MIN_INTERVAL;
+            if(interval == 0) interval = STUDIO_TITLE_MIN_INTERVAL;
+
+            if(studio->title_last_counter == 0 || counter < studio->title_last_counter ||
+                (counter - studio->title_last_counter) >= interval)
             {
-                uint64_t interval = freq > 0 ? (freq / STUDIO_TITLE_UPDATE_HZ) : STUDIO_TITLE_MIN_INTERVAL;
-                if(interval == 0) interval = STUDIO_TITLE_MIN_INTERVAL;
-
-                if(studio->title_last_counter == 0 || counter < studio->title_last_counter ||
-                    (counter - studio->title_last_counter) >= interval)
-                {
-                    updateTitle(studio);
-                    studio->title_last_counter = counter;
-                    studio->title_pending = false;
-                }
+                updateTitle(studio);
+                studio->title_last_counter = counter;
+                studio->title_pending = false;
             }
         }
 #endif

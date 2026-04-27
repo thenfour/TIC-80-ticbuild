@@ -52,11 +52,10 @@ extern "C"
     // per-frame Lua VM instruction counts + GC memory bytes.
     void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes);
 
-    // Builds a short status string suitable for the window title, e.g.
-    // `FPS: 60 | listening on 127.0.0.1:9977`.
+    // Builds a short remoting status string suitable for appending to the window title.
     void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap);
 
-    // Returns whether the title should be refreshed (and clears the internal dirty flag).
+    // Returns whether the remoting status suffix should be refreshed (and clears the internal dirty flag).
     bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx);
 
 #ifdef __cplusplus

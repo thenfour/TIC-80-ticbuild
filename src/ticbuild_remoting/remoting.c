@@ -44,6 +44,7 @@ bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx) { (void)ctx; retu
 # pragma comment(lib, "Ws2_32.lib")
 
 # include "ticbuild_remoting/fps.h"
+# include "ticbuild_remoting/title_stats.h"
 # include "ticbuild_remoting/utils.h"
 typedef SOCKET tb_socket;
 # define TB_INVALID_SOCKET INVALID_SOCKET
@@ -82,8 +83,7 @@ struct TicbuildRemoting
     char* discovery_dir;
     bool global_disco;
 
-    // FPS tracking (time-window moving average)
-    tb_fps_tracker fps;
+    tb_title_stats titleStats;
 
     // Title/status tracking
     bool title_dirty;
@@ -95,12 +95,6 @@ struct TicbuildRemoting
     uint32_t user_scn_ms10;
     uint32_t user_bdr_ms10;
     uint32_t user_total_ms10;
-
-    // Per-frame Lua perf metrics
-    uint64_t user_tic_cycles;
-    uint64_t user_scn_cycles;
-    uint64_t user_bdr_cycles;
-    uint64_t lua_gc_mem_bytes;
 
     bool wsa_started;
 
@@ -123,13 +117,12 @@ void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_
 {
     if(!ctx) return;
 
-    if(tb_fps_on_frame(&ctx->fps, counter, freq))
-        tb_mark_title_dirty(ctx);
+    tb_title_stats_on_frame(&ctx->titleStats, counter, freq);
 }
 
 int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx)
 {
-    return ctx ? tb_fps_get(&ctx->fps) : 0;
+    return ctx ? tb_title_stats_get_fps(&ctx->titleStats) : 0;
 }
 
 void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms10, uint32_t scn_ms10, uint32_t bdr_ms10, uint32_t total_ms10)
@@ -153,17 +146,7 @@ void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, 
 {
     if(!ctx) return;
 
-    if(ctx->user_tic_cycles != tic_cycles ||
-       ctx->user_scn_cycles != scn_cycles ||
-       ctx->user_bdr_cycles != bdr_cycles ||
-       ctx->lua_gc_mem_bytes != lua_gc_mem_bytes)
-    {
-        ctx->user_tic_cycles = tic_cycles;
-        ctx->user_scn_cycles = scn_cycles;
-        ctx->user_bdr_cycles = bdr_cycles;
-        ctx->lua_gc_mem_bytes = lua_gc_mem_bytes;
-        tb_mark_title_dirty(ctx);
-    }
+    tb_title_stats_set_lua_perf(&ctx->titleStats, tic_cycles, scn_cycles, bdr_cycles, lua_gc_mem_bytes);
 }
 
 void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, size_t outcap)
@@ -190,21 +173,7 @@ void ticbuild_remoting_get_title_info(const TicbuildRemoting* ctx, char* out, si
         listen_state = "remoting not listening";
     }
 
-    char ticbuf[32], scnbuf[32], totbuf[32];
-    char luabuf[32];
-    uint64_t scn_bdr_cycles = ctx->user_scn_cycles + ctx->user_bdr_cycles;
-
-    tb_format_kc1(ticbuf, sizeof ticbuf, ctx->user_tic_cycles);
-    tb_format_kc1(scnbuf, sizeof scnbuf, scn_bdr_cycles);
-    tb_format_kc1(totbuf, sizeof totbuf, ctx->user_tic_cycles + scn_bdr_cycles);
-    tb_format_kb1(luabuf, sizeof luabuf, ctx->lua_gc_mem_bytes);
-
-    snprintf(out, outcap,
-        "FPS: %d | TIC %sk SCN+BDR %sk TOT %sk | LUA %sKB | %s",
-        tb_fps_get(&ctx->fps),
-        ticbuf, scnbuf, totbuf,
-        luabuf,
-        listen_state);
+    snprintf(out, outcap, "%s", listen_state);
 }
 
 bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx)
@@ -1015,7 +984,7 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
 
         char fpsbuf[32];
         char data[512];
-        tb_format_fps(fpsbuf, sizeof fpsbuf, &ctx->fps);
+        tb_format_fps(fpsbuf, sizeof fpsbuf, &ctx->titleStats.fps);
 
         snprintf(data, sizeof data,
             "client_count=%d,"
@@ -1026,10 +995,10 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
             "lua_gc_mem=%llu",
             ctx->client_count,
             fpsbuf,
-            (unsigned long long)ctx->user_tic_cycles,
-            (unsigned long long)ctx->user_scn_cycles,
-            (unsigned long long)ctx->user_bdr_cycles,
-            (unsigned long long)ctx->lua_gc_mem_bytes);
+            (unsigned long long)ctx->titleStats.tic_cycles,
+            (unsigned long long)ctx->titleStats.scn_cycles,
+            (unsigned long long)ctx->titleStats.bdr_cycles,
+            (unsigned long long)ctx->titleStats.lua_mem_bytes);
 
         tb_free_args(args, argc);
         tb_send_response_str(client, id, true, data);
@@ -1162,7 +1131,7 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, bo
         ctx->discovery_dir = strdup(session_dir);
     ctx->global_disco = global_disco;
 
-    tb_fps_init(&ctx->fps);
+    tb_fps_init(&ctx->titleStats.fps);
 
     ctx->listen_sock = TB_INVALID_SOCKET;
     ctx->client_count = 0;
