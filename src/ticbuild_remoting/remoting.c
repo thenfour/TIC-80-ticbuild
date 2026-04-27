@@ -52,10 +52,14 @@ static int tb_last_socket_error(void) { return WSAGetLastError(); }
 static bool tb_would_block(int err) { return err == WSAEWOULDBLOCK; }
 
 /* just make these huge; there's not much reason in a windows x64 env to restrict. */
-enum { TB_INBUF_LIMIT = 1024 * 1024 /* 1 MB */ };
-enum { TB_OUTBUF_LIMIT = 1024 * 1024 };
-enum { TB_LINE_LIMIT = 1024 * 1024 };
-enum { TB_PEEK_LIMIT = 1024 * 1024 };
+enum { TB_INBUF_LIMIT = 1024 * 1024 * 10 /* 10 MB */ };
+enum { TB_OUTBUF_LIMIT = 1024 * 1024 * 10 };
+enum { TB_LINE_LIMIT = 1024 * 1024 * 10 };
+enum { TB_TEXT_LINE_LIMIT = TB_OUTBUF_LIMIT < TB_LINE_LIMIT ? TB_OUTBUF_LIMIT : TB_LINE_LIMIT };
+enum { TB_RESPONSE_TEXT_HEADROOM = 64 };
+enum { TB_BYTES_RESPONSE_HEADROOM = 68 };
+enum { TB_RESPONSE_TEXT_LIMIT = TB_TEXT_LINE_LIMIT > TB_RESPONSE_TEXT_HEADROOM ? (TB_TEXT_LINE_LIMIT - TB_RESPONSE_TEXT_HEADROOM) : TB_TEXT_LINE_LIMIT };
+enum { TB_PEEK_LIMIT = TB_TEXT_LINE_LIMIT > TB_BYTES_RESPONSE_HEADROOM ? (TB_TEXT_LINE_LIMIT - TB_BYTES_RESPONSE_HEADROOM) / 3 : 0 };
 enum { TB_MAX_CLIENTS = 10 };
 
 typedef struct
@@ -309,23 +313,74 @@ static void tb_queue_output(tb_client* client, const char* s, size_t n)
 
 static void tb_send_response_str(tb_client* client, int64_t id, bool ok, const char* data)
 {
-    char line[2048];
+    char prefix[64];
+
     if(ok)
     {
-        if(data && data[0])
-            snprintf(line, sizeof line, "%lld OK %s\n", (long long)id, data);
-        else
-            snprintf(line, sizeof line, "%lld OK\n", (long long)id);
+        int plen = snprintf(prefix, sizeof prefix, "%lld OK", (long long)id);
+        if(plen < 0) return;
+
+        size_t prefix_len = (size_t)plen;
+        size_t data_len = (data && data[0]) ? strlen(data) : 0;
+        size_t line_len = prefix_len + (data_len ? (1 + data_len) : 0) + 1;
+
+        char* line = (char*)malloc(line_len + 1);
+        if(!line)
+        {
+            char fallback[64];
+            int flen = snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
+            if(flen > 0)
+                tb_queue_output(client, fallback, (size_t)flen);
+            return;
+        }
+
+        size_t pos = 0;
+        memcpy(line + pos, prefix, prefix_len);
+        pos += prefix_len;
+
+        if(data_len)
+        {
+            line[pos++] = ' ';
+            memcpy(line + pos, data, data_len);
+            pos += data_len;
+        }
+
+        line[pos++] = '\n';
+        line[pos] = '\0';
+
+        tb_queue_output(client, line, pos);
+        free(line);
     }
     else
     {
-        char esc[1500];
-        size_t elen = tb_escape_string(data ? data : "error", strlen(data ? data : "error"), esc, sizeof esc);
-        (void)elen;
-        snprintf(line, sizeof line, "%lld ERR \"%s\"\n", (long long)id, esc);
-    }
+        const char* raw = data ? data : "error";
+        size_t raw_len = strlen(raw);
+        size_t esc_len = tb_escape_string_len(raw, raw_len);
+        int plen = snprintf(prefix, sizeof prefix, "%lld ERR \"", (long long)id);
+        if(plen < 0) return;
 
-    tb_queue_output(client, line, strlen(line));
+        size_t prefix_len = (size_t)plen;
+        size_t line_len = prefix_len + esc_len + 2;
+        char* line = (char*)malloc(line_len + 1);
+        if(!line)
+        {
+            char fallback[64];
+            int flen = snprintf(fallback, sizeof fallback, "%lld ERR \"out of memory\"\n", (long long)id);
+            if(flen > 0)
+                tb_queue_output(client, fallback, (size_t)flen);
+            return;
+        }
+
+        memcpy(line, prefix, prefix_len);
+        size_t pos = prefix_len;
+        pos += tb_escape_string(raw, raw_len, line + pos, esc_len + 1);
+        line[pos++] = '"';
+        line[pos++] = '\n';
+        line[pos] = '\0';
+
+        tb_queue_output(client, line, pos);
+        free(line);
+    }
 }
 
 static void tb_send_response_bytes(tb_client* client, int64_t id, const uint8_t* bytes, size_t n)
@@ -333,6 +388,12 @@ static void tb_send_response_bytes(tb_client* client, int64_t id, const uint8_t*
     // Format: <id> OK <aa bb cc>
     // Worst-case size: 1 token per byte + spaces.
     size_t cap = 64 + n * 3 + 4;
+    if(cap > TB_TEXT_LINE_LIMIT)
+    {
+        tb_send_response_str(client, id, false, "result too large");
+        return;
+    }
+
     char* line = (char*)malloc(cap);
     if(!line) { tb_send_response_str(client, id, false, "out of memory"); return; }
 
@@ -349,6 +410,11 @@ static void tb_send_response_bytes(tb_client* client, int64_t id, const uint8_t*
 
     tb_queue_output(client, line, pos);
     free(line);
+}
+
+static void tb_text_response_init(tb_text_buffer* buf)
+{
+    tb_text_buffer_init(buf, TB_RESPONSE_TEXT_LIMIT);
 }
 
 
@@ -888,11 +954,12 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
             return;
         }
 
-        char out[1024];
-        out[0] = '\0';
-        bool ok = ctx->cb.eval_expr(ctx->cb.userdata, args[0].v.s.ptr, out, sizeof out, err, sizeof err);
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        bool ok = ctx->cb.eval_expr(ctx->cb.userdata, args[0].v.s.ptr, &out, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(client, id, ok, ok ? out : err);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
         return;
     }
 
@@ -912,19 +979,12 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
             return;
         }
 
-        size_t outcap = TB_OUTBUF_LIMIT > 128 ? (TB_OUTBUF_LIMIT - 128) : TB_OUTBUF_LIMIT;
-        char* out = (char*)malloc(outcap);
-        if(!out)
-        {
-            tb_free_args(args, argc);
-            tb_send_response_str(client, id, false, "out of memory");
-            return;
-        }
-        out[0] = '\0';
-        bool ok = ctx->cb.list_globals(ctx->cb.userdata, out, outcap, err, sizeof err);
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        bool ok = ctx->cb.list_globals(ctx->cb.userdata, &out, err, sizeof err);
         tb_free_args(args, argc);
-        tb_send_response_str(client, id, ok, ok ? out : err);
-        free(out);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
         return;
     }
 
@@ -992,42 +1052,12 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
             return;
         }
 
-        char raw[1024];
-        raw[0] = '\0';
-        bool ok = ctx->cb.cart_path(ctx->cb.userdata, raw, sizeof raw, err, sizeof err);
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        bool ok = ctx->cb.cart_path(ctx->cb.userdata, &out, err, sizeof err);
         tb_free_args(args, argc);
-        if(!ok)
-        {
-            tb_send_response_str(client, id, false, err);
-            return;
-        }
-
-        size_t rawlen = strlen(raw);
-        size_t esc_len = tb_escape_string_len(raw, rawlen);
-        char* esc = (char*)malloc(esc_len + 1);
-        if(!esc)
-        {
-            tb_send_response_str(client, id, false, "out of memory");
-            return;
-        }
-        tb_escape_string(raw, rawlen, esc, esc_len + 1);
-
-        size_t data_len = esc_len + 2;
-        char* data = (char*)malloc(data_len + 1);
-        if(!data)
-        {
-            free(esc);
-            tb_send_response_str(client, id, false, "out of memory");
-            return;
-        }
-        data[0] = '"';
-        memcpy(data + 1, esc, esc_len);
-        data[1 + esc_len] = '"';
-        data[2 + esc_len] = '\0';
-
-        tb_send_response_str(client, id, true, data);
-        free(esc);
-        free(data);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
         return;
     }
 
@@ -1047,42 +1077,12 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
             return;
         }
 
-        char raw[1024];
-        raw[0] = '\0';
-        bool ok = ctx->cb.fs_path(ctx->cb.userdata, raw, sizeof raw, err, sizeof err);
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        bool ok = ctx->cb.fs_path(ctx->cb.userdata, &out, err, sizeof err);
         tb_free_args(args, argc);
-        if(!ok)
-        {
-            tb_send_response_str(client, id, false, err);
-            return;
-        }
-
-        size_t rawlen = strlen(raw);
-        size_t esc_len = tb_escape_string_len(raw, rawlen);
-        char* esc = (char*)malloc(esc_len + 1);
-        if(!esc)
-        {
-            tb_send_response_str(client, id, false, "out of memory");
-            return;
-        }
-        tb_escape_string(raw, rawlen, esc, esc_len + 1);
-
-        size_t data_len = esc_len + 2;
-        char* data = (char*)malloc(data_len + 1);
-        if(!data)
-        {
-            free(esc);
-            tb_send_response_str(client, id, false, "out of memory");
-            return;
-        }
-        data[0] = '"';
-        memcpy(data + 1, esc, esc_len);
-        data[1 + esc_len] = '"';
-        data[2 + esc_len] = '\0';
-
-        tb_send_response_str(client, id, true, data);
-        free(esc);
-        free(data);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
         return;
     }
 
@@ -1102,42 +1102,12 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
             return;
         }
 
-        char raw[1024];
-        raw[0] = '\0';
-        bool ok = ctx->cb.metadata(ctx->cb.userdata, args[0].v.s.ptr, raw, sizeof raw, err, sizeof err);
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        bool ok = ctx->cb.metadata(ctx->cb.userdata, args[0].v.s.ptr, &out, err, sizeof err);
         tb_free_args(args, argc);
-        if(!ok)
-        {
-            tb_send_response_str(client, id, false, err);
-            return;
-        }
-
-        size_t rawlen = strlen(raw);
-        size_t esc_len = tb_escape_string_len(raw, rawlen);
-        char* esc = (char*)malloc(esc_len + 1);
-        if(!esc)
-        {
-            tb_send_response_str(client, id, false, "out of memory");
-            return;
-        }
-        tb_escape_string(raw, rawlen, esc, esc_len + 1);
-
-        size_t data_len = esc_len + 2;
-        char* data = (char*)malloc(data_len + 1);
-        if(!data)
-        {
-            free(esc);
-            tb_send_response_str(client, id, false, "out of memory");
-            return;
-        }
-        data[0] = '"';
-        memcpy(data + 1, esc, esc_len);
-        data[1 + esc_len] = '"';
-        data[2 + esc_len] = '\0';
-
-        tb_send_response_str(client, id, true, data);
-        free(esc);
-        free(data);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
         return;
     }
 

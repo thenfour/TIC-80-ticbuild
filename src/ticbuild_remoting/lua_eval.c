@@ -2,6 +2,7 @@
 
 #include "core/core.h"
 #include "lua_serialize.h"
+#include "ticbuild_remoting/utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -12,10 +13,15 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
-bool tb_lua_eval_expr(tic_mem* tic, const char* expr, char* out, size_t outcap, char* err, size_t errcap)
+bool tb_lua_eval_expr(tic_mem* tic, const char* expr, tb_text_buffer* out, char* err, size_t errcap)
 {
-    if(out && outcap) out[0] = '\0';
     if(err && errcap) err[0] = '\0';
+
+    if(!out)
+    {
+        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        return false;
+    }
 
     if(!expr || !expr[0])
     {
@@ -62,7 +68,7 @@ bool tb_lua_eval_expr(tic_mem* tic, const char* expr, char* out, size_t outcap, 
 
     free(chunk);
 
-    bool ok = tb_lua_serialize_expr(lua, -1, out, outcap, err, errcap);
+    bool ok = tb_lua_serialize_expr(lua, -1, out, err, errcap);
     lua_settop(lua, 0);
     return ok;
 }
@@ -109,9 +115,8 @@ static int tb_strcmp_qsort(const void* a, const void* b)
     return strcmp(*sa, *sb);
 }
 
-bool tb_lua_list_globals(tic_mem* tic, char* out, size_t outcap, char* err, size_t errcap)
+bool tb_lua_list_globals(tic_mem* tic, tb_text_buffer* out, char* err, size_t errcap)
 {
-    if(out && outcap) out[0] = '\0';
     if(err && errcap) err[0] = '\0';
 
     tic_core* core = (tic_core*)tic;
@@ -123,7 +128,7 @@ bool tb_lua_list_globals(tic_mem* tic, char* out, size_t outcap, char* err, size
         return false;
     }
 
-    if(!out || outcap == 0)
+    if(!out)
     {
         if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
         return false;
@@ -203,29 +208,25 @@ bool tb_lua_list_globals(tic_mem* tic, char* out, size_t outcap, char* err, size
     if(count > 1)
         qsort(names, count, sizeof(char*), tb_strcmp_qsort);
 
-    size_t outlen = 0;
     for(size_t i = 0; i < count; i++)
     {
-        size_t nlen = strlen(names[i]);
-        size_t extra = (i == 0) ? 0 : 1;
-        if(outlen + nlen + extra + 1 >= outcap)
+        if(i != 0)
         {
-            if(err && errcap) { strncpy(err, "result too large", errcap - 1); err[errcap - 1] = '\0'; }
+            if(!tb_text_buffer_append_char(out, ',', err, errcap))
+            {
+                for(size_t j = 0; j < count; j++) free(names[j]);
+                free(names);
+                return false;
+            }
+        }
+
+        if(!tb_text_buffer_append_cstr(out, names[i], err, errcap))
+        {
             for(size_t j = 0; j < count; j++) free(names[j]);
             free(names);
             return false;
         }
-
-        if(i != 0)
-            out[outlen++] = ',';
-
-        memcpy(out + outlen, names[i], nlen);
-        outlen += nlen;
-        out[outlen] = '\0';
     }
-
-    if(outlen == 0)
-        out[0] = '\0';
 
     for(size_t i = 0; i < count; i++) free(names[i]);
     free(names);

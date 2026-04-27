@@ -11,6 +11,14 @@ extern "C"
 {
 #endif
 
+    typedef struct tb_text_buffer
+    {
+        char* ptr;
+        size_t len;
+        size_t cap;
+        size_t limit;
+    } tb_text_buffer;
+
     typedef struct
     {
         const char* ptr;
@@ -47,6 +55,14 @@ extern "C"
     void tb_format_fps(char* out, size_t cap, const tb_fps_tracker* fps);
 
     void tb_set_err(char* err, size_t cap, const char* msg);
+    void tb_text_buffer_init(tb_text_buffer* buf, size_t limit);
+    void tb_text_buffer_dispose(tb_text_buffer* buf);
+    const char* tb_text_buffer_data(const tb_text_buffer* buf);
+    bool tb_text_buffer_append(tb_text_buffer* buf, const char* s, size_t n, char* err, size_t errcap);
+    bool tb_text_buffer_append_char(tb_text_buffer* buf, char c, char* err, size_t errcap);
+    bool tb_text_buffer_append_cstr(tb_text_buffer* buf, const char* s, char* err, size_t errcap);
+    bool tb_text_buffer_append_escaped(tb_text_buffer* buf, const char* s, size_t n, char* err, size_t errcap);
+    bool tb_text_buffer_append_quoted(tb_text_buffer* buf, const char* s, size_t n, char* err, size_t errcap);
     bool tb_is_ascii_print_or_space(char c);
     bool tb_is_ascii_only(const char* s, size_t n);
 

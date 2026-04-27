@@ -5,6 +5,154 @@
 #include <stdlib.h>
 #include <string.h>
 
+void tb_text_buffer_init(tb_text_buffer* buf, size_t limit)
+{
+    if(!buf) return;
+
+    buf->ptr = NULL;
+    buf->len = 0;
+    buf->cap = 0;
+    buf->limit = limit;
+}
+
+void tb_text_buffer_dispose(tb_text_buffer* buf)
+{
+    if(!buf) return;
+
+    free(buf->ptr);
+    buf->ptr = NULL;
+    buf->len = 0;
+    buf->cap = 0;
+    buf->limit = 0;
+}
+
+const char* tb_text_buffer_data(const tb_text_buffer* buf)
+{
+    return (buf && buf->ptr) ? buf->ptr : "";
+}
+
+static bool tb_text_buffer_reserve(tb_text_buffer* buf, size_t extra, char* err, size_t errcap)
+{
+    if(!buf)
+    {
+        tb_set_err(err, errcap, "missing output buffer");
+        return false;
+    }
+
+    if(extra > SIZE_MAX - buf->len - 1)
+    {
+        tb_set_err(err, errcap, "result too large");
+        return false;
+    }
+
+    size_t needed = buf->len + extra + 1;
+    if(needed > buf->limit)
+    {
+        tb_set_err(err, errcap, "result too large");
+        return false;
+    }
+
+    if(needed <= buf->cap)
+        return true;
+
+    size_t new_cap = buf->cap ? buf->cap : 64;
+    while(new_cap < needed)
+    {
+        if(new_cap >= buf->limit)
+        {
+            new_cap = buf->limit;
+            break;
+        }
+
+        size_t grown = new_cap * 2;
+        if(grown <= new_cap)
+        {
+            new_cap = needed;
+            break;
+        }
+
+        if(grown > buf->limit)
+            grown = buf->limit;
+
+        new_cap = grown;
+    }
+
+    if(new_cap < needed)
+        new_cap = needed;
+
+    char* next = (char*)realloc(buf->ptr, new_cap);
+    if(!next)
+    {
+        tb_set_err(err, errcap, "out of memory");
+        return false;
+    }
+
+    buf->ptr = next;
+    buf->cap = new_cap;
+
+    if(buf->len == 0)
+        buf->ptr[0] = '\0';
+
+    return true;
+}
+
+bool tb_text_buffer_append(tb_text_buffer* buf, const char* s, size_t n, char* err, size_t errcap)
+{
+    if(n == 0)
+    {
+        if(!tb_text_buffer_reserve(buf, 0, err, errcap))
+            return false;
+        return true;
+    }
+
+    if(!s)
+    {
+        tb_set_err(err, errcap, "invalid string");
+        return false;
+    }
+
+    if(!tb_text_buffer_reserve(buf, n, err, errcap))
+        return false;
+
+    memcpy(buf->ptr + buf->len, s, n);
+    buf->len += n;
+    buf->ptr[buf->len] = '\0';
+    return true;
+}
+
+bool tb_text_buffer_append_char(tb_text_buffer* buf, char c, char* err, size_t errcap)
+{
+    return tb_text_buffer_append(buf, &c, 1, err, errcap);
+}
+
+bool tb_text_buffer_append_cstr(tb_text_buffer* buf, const char* s, char* err, size_t errcap)
+{
+    const char* str = s ? s : "";
+    return tb_text_buffer_append(buf, str, strlen(str), err, errcap);
+}
+
+bool tb_text_buffer_append_escaped(tb_text_buffer* buf, const char* s, size_t n, char* err, size_t errcap)
+{
+    const char* str = s ? s : "";
+    size_t esc_len = tb_escape_string_len(str, n);
+
+    if(!tb_text_buffer_reserve(buf, esc_len, err, errcap))
+        return false;
+
+    size_t wrote = tb_escape_string(str, n, buf->ptr + buf->len, esc_len + 1);
+    buf->len += wrote;
+    return true;
+}
+
+bool tb_text_buffer_append_quoted(tb_text_buffer* buf, const char* s, size_t n, char* err, size_t errcap)
+{
+    if(!tb_text_buffer_append_char(buf, '"', err, errcap))
+        return false;
+    if(!tb_text_buffer_append_escaped(buf, s, n, err, errcap))
+        return false;
+    return tb_text_buffer_append_char(buf, '"', err, errcap);
+}
+
 void tb_format_ms10(char* out, size_t cap, uint32_t ms10)
 {
     if(!out || cap == 0) return;

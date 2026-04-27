@@ -1,5 +1,7 @@
 #include "lua_serialize.h"
 
+#include "ticbuild_remoting/utils.h"
+
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -10,14 +12,12 @@
 
 typedef struct
 {
-    char* out;
-    size_t cap;
-    size_t len;
+    tb_text_buffer* out;
     char* err;
     size_t errcap;
 } tb_lua_ser_ctx;
 
-static void tb_set_err(tb_lua_ser_ctx* ctx, const char* msg)
+static void tb_lua_ser_set_err(tb_lua_ser_ctx* ctx, const char* msg)
 {
     if(ctx->err && ctx->errcap)
     {
@@ -28,19 +28,7 @@ static void tb_set_err(tb_lua_ser_ctx* ctx, const char* msg)
 
 static bool tb_append(tb_lua_ser_ctx* ctx, const char* s, size_t n)
 {
-    if(!ctx->out || ctx->cap == 0)
-        return false;
-
-    if(ctx->len + n + 1 > ctx->cap)
-    {
-        tb_set_err(ctx, "result too large");
-        return false;
-    }
-
-    memcpy(ctx->out + ctx->len, s, n);
-    ctx->len += n;
-    ctx->out[ctx->len] = '\0';
-    return true;
+    return tb_text_buffer_append(ctx->out, s, n, ctx->err, ctx->errcap);
 }
 
 static bool tb_append_char(tb_lua_ser_ctx* ctx, char c)
@@ -53,7 +41,7 @@ static bool tb_append_cstr(tb_lua_ser_ctx* ctx, const char* s)
     return tb_append(ctx, s, strlen(s));
 }
 
-static void tb_set_err_fmt(tb_lua_ser_ctx* ctx, const char* fmt, const char* arg)
+static void tb_lua_ser_set_err_fmt(tb_lua_ser_ctx* ctx, const char* fmt, const char* arg)
 {
     if(ctx->err && ctx->errcap)
     {
@@ -118,7 +106,7 @@ static bool tb_serialize_table(lua_State* lua, int index, tb_lua_ser_ctx* ctx, i
 {
     if(depth > TB_LUA_SERIALIZE_MAX_DEPTH)
     {
-        tb_set_err(ctx, "table too deep");
+        tb_lua_ser_set_err(ctx, "table too deep");
         return false;
     }
 
@@ -130,7 +118,7 @@ static bool tb_serialize_table(lua_State* lua, int index, tb_lua_ser_ctx* ctx, i
     if(!lua_isnil(lua, -1))
     {
         lua_pop(lua, 1);
-        tb_set_err(ctx, "cycle detected");
+        tb_lua_ser_set_err(ctx, "cycle detected");
         return false;
     }
     lua_pop(lua, 1);
@@ -179,7 +167,7 @@ static bool tb_serialize_table(lua_State* lua, int index, tb_lua_ser_ctx* ctx, i
             if(ktype == LUA_TTABLE || ktype == LUA_TFUNCTION || ktype == LUA_TTHREAD || ktype == LUA_TUSERDATA || ktype == LUA_TLIGHTUSERDATA)
             {
                 lua_pop(lua, 2);
-                tb_set_err(ctx, "unsupported key type");
+                tb_lua_ser_set_err(ctx, "unsupported key type");
                 return false;
             }
 
@@ -257,27 +245,34 @@ static bool tb_serialize_value(lua_State* lua, int index, tb_lua_ser_ctx* ctx, i
         {
             const char* tname = lua_typename(lua, type);
             if(tname)
-                tb_set_err_fmt(ctx, "unsupported result type: %s", tname);
+                tb_lua_ser_set_err_fmt(ctx, "unsupported result type: %s", tname);
             else
-                tb_set_err(ctx, "unsupported result type");
+                tb_lua_ser_set_err(ctx, "unsupported result type");
             return false;
         }
     }
 }
 
-bool tb_lua_serialize_expr(lua_State* lua, int index, char* out, size_t outcap, char* err, size_t errcap)
+bool tb_lua_serialize_expr(lua_State* lua, int index, tb_text_buffer* out, char* err, size_t errcap)
 {
     tb_lua_ser_ctx ctx =
     {
         .out = out,
-        .cap = outcap,
-        .len = 0,
         .err = err,
         .errcap = errcap,
     };
 
-    if(out && outcap) out[0] = '\0';
     if(err && errcap) err[0] = '\0';
+
+    if(!out)
+    {
+        if(err && errcap)
+        {
+            strncpy(err, "missing output buffer", errcap - 1);
+            err[errcap - 1] = '\0';
+        }
+        return false;
+    }
 
     int abs_index = lua_absindex(lua, index);
 

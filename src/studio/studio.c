@@ -41,6 +41,7 @@
 #include "ext/history.h"
 #include "net.h"
 #include "ticbuild_remoting/remoting.h"
+#include "ticbuild_remoting/utils.h"
 #include "ticbuild_remoting/fps.h"
 #include "ticbuild_remoting/perf_hud.h"
 #include "ticbuild_remoting/user_timing.h"
@@ -385,11 +386,9 @@ static bool remoting_eval(void* userdata, const char* code, char* err, size_t er
     return false;
 }
 
-static bool remoting_eval_expr(void* userdata, const char* expr, char* out, size_t outcap, char* err, size_t errcap)
+static bool remoting_eval_expr(void* userdata, const char* expr, tb_text_buffer* out, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
-
-    if(out && outcap) out[0] = '\0';
 
     if(!studio || !studio->tic)
     {
@@ -410,14 +409,12 @@ static bool remoting_eval_expr(void* userdata, const char* expr, char* out, size
         return false;
     }
 
-    return tb_lua_eval_expr(studio->tic, expr, out, outcap, err, errcap);
+    return tb_lua_eval_expr(studio->tic, expr, out, err, errcap);
 }
 
-static bool remoting_list_globals(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+static bool remoting_list_globals(void* userdata, tb_text_buffer* out, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
-
-    if(out && outcap) out[0] = '\0';
 
     if(!studio || !studio->tic)
     {
@@ -432,14 +429,12 @@ static bool remoting_list_globals(void* userdata, char* out, size_t outcap, char
         return false;
     }
 
-    return tb_lua_list_globals(studio->tic, out, outcap, err, errcap);
+    return tb_lua_list_globals(studio->tic, out, err, errcap);
 }
 
-static bool remoting_cart_path(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+static bool remoting_cart_path(void* userdata, tb_text_buffer* out, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
-
-    if(out && outcap) out[0] = '\0';
 
     if(!studio || !studio->console)
     {
@@ -447,29 +442,20 @@ static bool remoting_cart_path(void* userdata, char* out, size_t outcap, char* e
         return false;
     }
 
-    if(!out || outcap == 0)
+    if(!out)
     {
-        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        tb_set_err(err, errcap, "missing output buffer");
         return false;
     }
 
     const char* path = studio->console->rom.path;
-    if(!path || !path[0])
-    {
-        out[0] = '\0';
-        return true;
-    }
-
-    strncpy(out, path, outcap - 1);
-    out[outcap - 1] = '\0';
-    return true;
+    const char* value = path ? path : "";
+    return tb_text_buffer_append_quoted(out, value, strlen(value), err, errcap);
 }
 
-static bool remoting_fs_path(void* userdata, char* out, size_t outcap, char* err, size_t errcap)
+static bool remoting_fs_path(void* userdata, tb_text_buffer* out, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
-
-    if(out && outcap) out[0] = '\0';
 
     if(!studio || !studio->fs)
     {
@@ -477,29 +463,20 @@ static bool remoting_fs_path(void* userdata, char* out, size_t outcap, char* err
         return false;
     }
 
-    if(!out || outcap == 0)
+    if(!out)
     {
-        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        tb_set_err(err, errcap, "missing output buffer");
         return false;
     }
 
     const char* path = tic_fs_pathroot(studio->fs, "");
-    if(!path)
-    {
-        out[0] = '\0';
-        return true;
-    }
-
-    strncpy(out, path, outcap - 1);
-    out[outcap - 1] = '\0';
-    return true;
+    const char* value = path ? path : "";
+    return tb_text_buffer_append_quoted(out, value, strlen(value), err, errcap);
 }
 
-static bool remoting_metadata(void* userdata, const char* key, char* out, size_t outcap, char* err, size_t errcap)
+static bool remoting_metadata(void* userdata, const char* key, tb_text_buffer* out, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
-
-    if(out && outcap) out[0] = '\0';
 
     if(!studio || !studio->tic)
     {
@@ -513,9 +490,9 @@ static bool remoting_metadata(void* userdata, const char* key, char* out, size_t
         return false;
     }
 
-    if(!out || outcap == 0)
+    if(!out)
     {
-        if(err && errcap) { strncpy(err, "missing output buffer", errcap - 1); err[errcap - 1] = '\0'; }
+        tb_set_err(err, errcap, "missing output buffer");
         return false;
     }
 
@@ -525,9 +502,7 @@ static bool remoting_metadata(void* userdata, const char* key, char* out, size_t
     if(value == NULL || value[0] == '\0')
         value = tic_tool_metatag(studio->tic->cart.code.data, key, NULL);
 
-    strncpy(out, value ? value : "", outcap - 1);
-    out[outcap - 1] = '\0';
-    return true;
+    return tb_text_buffer_append_quoted(out, value ? value : "", strlen(value ? value : ""), err, errcap);
 }
 #endif
 
