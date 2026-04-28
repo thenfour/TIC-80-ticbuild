@@ -14,6 +14,7 @@ enum
     TB_PERF_GRAPH_SPEED_MAX = 8,
     TB_PERF_GRAPH_SPEED_MIN = 1,
     TB_PERF_GRAPH_SPEED_DEFAULT = 5,
+    TB_PERF_TOP_OFFSET = 8,
     TB_PERF_GRAPH_GAP = 2,
     TB_PERF_VALUE_GAP = 2,
     TB_PERF_VALUE_WIDTH_CHARS = 6,
@@ -845,7 +846,7 @@ void ticbuild_perf_hud_draw(
 
     bool draw_graphs = (mode == TB_PERF_HUD_FULL);
     s32 graph_x = 0;
-    s32 graph_y = 0;
+    s32 graph_y = TB_PERF_TOP_OFFSET;
     s32 value_x = graph_x + graph_width + TB_PERF_GRAPH_GAP;
     s32 label_x = value_x + (s32)TB_PERF_VALUE_WIDTH_CHARS * (s32)tic->ram->font.alt.width + TB_PERF_VALUE_GAP;
     s32 text_offset = (graph_height - tic->ram->font.alt.height) / 2;
