@@ -1293,7 +1293,7 @@ void ticbuild_remoting_close(TicbuildRemoting* ctx)
     for(int i = 0; i < TB_MAX_CLIENTS; i++)
         tb_disconnect_client(ctx, i);
 
-    tb_discovery_stop();
+    tb_discovery_stop("remoting close");
 
     if(ctx->listen_sock != TB_INVALID_SOCKET)
     {
@@ -1316,7 +1316,7 @@ void ticbuild_remoting_tick(TicbuildRemoting* ctx)
     char err[128];
     if(!tb_socket_init(ctx, err, sizeof err))
     {
-        tb_discovery_stop();
+        tb_discovery_stop("socket init failure");
         tb_set_err(ctx->last_listen_err, sizeof ctx->last_listen_err, err[0] ? err : "socket init failed");
         tb_mark_title_dirty(ctx);
         return;

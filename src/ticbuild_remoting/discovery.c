@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,6 +19,32 @@ static void tb_set_err(char* err, size_t errcap, const char* msg)
     if(!msg) msg = "error";
     strncpy(err, msg, errcap - 1);
     err[errcap - 1] = '\0';
+}
+
+static void tb_log_discovery_io_failure(const char* action, const char* path, const char* detail)
+{
+    printf("[remoting] discovery %s failed%s%s%s%s%s\n",
+        action ? action : "operation",
+        path && path[0] ? ": " : "",
+        path && path[0] ? path : "",
+        detail && detail[0] ? " (" : "",
+        detail && detail[0] ? detail : "",
+        detail && detail[0] ? ")" : "");
+}
+
+static void tb_log_discovery_deleted(const char* path, const char* reason)
+{
+    printf("[remoting] discovery file deleted (%s): %s\n",
+        (reason && reason[0]) ? reason : "unspecified",
+        (path && path[0]) ? path : "<unknown>");
+}
+
+static void tb_log_discovery_delete_failure(const char* path, const char* reason, DWORD error)
+{
+    printf("[remoting] discovery file delete failed (%s, error=%lu): %s\n",
+        (reason && reason[0]) ? reason : "unspecified",
+        (unsigned long)error,
+        (path && path[0]) ? path : "<unknown>");
 }
 
 static bool tb_ensure_dir(const char* path, char* err, size_t errcap)
@@ -97,11 +124,27 @@ static bool tb_write_discovery_file(const char* dir, int port, const char* json,
     if(!f)
     {
         tb_set_err(err, errcap, "failed to write discovery file");
+        tb_log_discovery_io_failure("open", outpath, strerror(errno));
         return false;
     }
 
-    fwrite(json, 1, json_len, f);
-    fclose(f);
+    size_t written = fwrite(json, 1, json_len, f);
+    if(written != json_len)
+    {
+        tb_set_err(err, errcap, "failed to write discovery file");
+        fclose(f);
+        DeleteFileA(outpath);
+        tb_log_discovery_io_failure("write", outpath, strerror(errno));
+        return false;
+    }
+
+    if(fclose(f) != 0)
+    {
+        tb_set_err(err, errcap, "failed to flush discovery file");
+        DeleteFileA(outpath);
+        tb_log_discovery_io_failure("flush", outpath, strerror(errno));
+        return false;
+    }
 
     printf("[remoting] discovery file written: %s\n", outpath);
 
@@ -174,15 +217,31 @@ bool tb_discovery_start(int port, const char* session_dir, bool global_disco, ch
     return true;
 }
 
-void tb_discovery_stop(void)
+static void tb_delete_discovery_file(const char* path, const char* reason)
+{
+    if(!path || !path[0])
+        return;
+
+    if(DeleteFileA(path))
+    {
+        tb_log_discovery_deleted(path, reason);
+        return;
+    }
+
+    {
+        DWORD error = GetLastError();
+        if(error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+            tb_log_discovery_delete_failure(path, reason, error);
+    }
+}
+
+void tb_discovery_stop(const char* reason)
 {
     if(!g_discovery_active)
         return;
 
-    if(g_discovery_path_global[0])
-        DeleteFileA(g_discovery_path_global);
-    if(g_discovery_path_custom[0])
-        DeleteFileA(g_discovery_path_custom);
+    tb_delete_discovery_file(g_discovery_path_global, reason);
+    tb_delete_discovery_file(g_discovery_path_custom, reason);
 
     g_discovery_path_global[0] = '\0';
     g_discovery_path_custom[0] = '\0';
