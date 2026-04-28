@@ -245,6 +245,24 @@ bool ticbuild_user_timing_get_last_ms10(
     return true;
 }
 
+bool ticbuild_user_timing_get_last_total_ticks(
+    tic_mem* tic,
+    uint64_t* total_ticks,
+    uint64_t* freq)
+{
+    if(total_ticks) *total_ticks = 0;
+    if(freq) *freq = 0;
+
+    tb_user_timing_slot* slot = get_slot(tic, false);
+    if(!slot || slot->freq == 0)
+        return false;
+
+    if(total_ticks) *total_ticks = slot->last_total_ticks;
+    if(freq) *freq = slot->freq;
+
+    return true;
+}
+
 bool ticbuild_user_timing_get_last_cycles(
     tic_mem* tic,
     uint64_t* tic_cycles,

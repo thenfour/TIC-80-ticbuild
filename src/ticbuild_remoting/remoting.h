@@ -52,6 +52,9 @@ extern "C"
     // per-frame time spent in user callbacks, in 0.1ms units.
     void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms10, uint32_t scn_ms10, uint32_t bdr_ms10, uint32_t total_ms10);
 
+    // raw total timing snapshot for higher-precision derived metrics.
+    void ticbuild_remoting_set_user_time_ticks(TicbuildRemoting* ctx, uint64_t total_ticks, uint64_t timing_freq);
+
     // per-frame Lua VM instruction counts + GC memory bytes.
     void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes);
 

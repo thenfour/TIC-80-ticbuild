@@ -28,6 +28,12 @@ extern "C"
         uint32_t* total_ms10);
 
     // returns false if unavailable.
+    bool ticbuild_user_timing_get_last_total_ticks(
+        tic_mem* tic,
+        uint64_t* total_ticks,
+        uint64_t* freq);
+
+    // returns false if unavailable.
     bool ticbuild_user_timing_get_last_cycles(
         tic_mem* tic,
         uint64_t* tic_cycles,

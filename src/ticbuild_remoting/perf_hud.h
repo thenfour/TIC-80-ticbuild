@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #include "api.h"
-#include "ticbuild_remoting/fps.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -32,6 +31,8 @@ extern "C"
         uint32_t scn_ms10;
         uint32_t bdr_ms10;
         uint32_t total_ms10;
+        uint64_t total_ticks;
+        uint64_t timing_freq;
         uint64_t tic_cycles;
         uint64_t scn_cycles;
         uint64_t bdr_cycles;
@@ -62,8 +63,6 @@ extern "C"
 
     typedef struct
     {
-        tb_fps_tracker fps;
-
         double ema[TB_PERF_METRIC_COUNT];
         double display[TB_PERF_METRIC_COUNT];
 

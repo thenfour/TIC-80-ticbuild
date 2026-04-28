@@ -2946,6 +2946,7 @@ void studio_tick(Studio* studio, tic80_input input)
         {
             ticbuild_user_timing_end_frame(tic);
             ticbuild_user_timing_get_last_ms10(tic, &studio->perfFrame.tic_ms10, &studio->perfFrame.scn_ms10, &studio->perfFrame.bdr_ms10, &studio->perfFrame.total_ms10);
+            ticbuild_user_timing_get_last_total_ticks(tic, &studio->perfFrame.total_ticks, &studio->perfFrame.timing_freq);
             ticbuild_user_timing_get_last_cycles(tic, &studio->perfFrame.tic_cycles, &studio->perfFrame.scn_cycles, &studio->perfFrame.bdr_cycles);
             studio->perfFrame.lua_mem_bytes = ticbuild_lua_perf_get_mem_bytes(tic);
 
@@ -2976,6 +2977,10 @@ void studio_tick(Studio* studio, tic80_input input)
             studio->perfFrame.scn_ms10,
             studio->perfFrame.bdr_ms10,
             studio->perfFrame.total_ms10);
+        tb_title_stats_set_user_time_ticks(
+            &studio->titleStats,
+            studio->perfFrame.total_ticks,
+            studio->perfFrame.timing_freq);
         tb_title_stats_on_frame(&studio->titleStats, counter, freq);
 
         if(tb_title_stats_take_dirty(&studio->titleStats))
@@ -3002,6 +3007,10 @@ void studio_tick(Studio* studio, tic80_input input)
                 studio->perfFrame.scn_ms10,
                 studio->perfFrame.bdr_ms10,
                 studio->perfFrame.total_ms10);
+            ticbuild_remoting_set_user_time_ticks(
+                studio->remoting,
+                studio->perfFrame.total_ticks,
+                studio->perfFrame.timing_freq);
             ticbuild_remoting_set_lua_perf(
                 studio->remoting,
                 studio->perfFrame.tic_cycles,

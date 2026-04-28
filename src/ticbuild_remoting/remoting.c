@@ -26,6 +26,10 @@ void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms
 {
     (void)ctx; (void)tic_ms10; (void)scn_ms10; (void)bdr_ms10; (void)total_ms10;
 }
+void ticbuild_remoting_set_user_time_ticks(TicbuildRemoting* ctx, uint64_t total_ticks, uint64_t timing_freq)
+{
+    (void)ctx; (void)total_ticks; (void)timing_freq;
+}
 void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes)
 {
     (void)ctx; (void)tic_cycles; (void)scn_cycles; (void)bdr_cycles; (void)lua_gc_mem_bytes;
@@ -130,6 +134,13 @@ void ticbuild_remoting_set_user_time_ms10(TicbuildRemoting* ctx, uint32_t tic_ms
     if(!ctx) return;
 
     tb_title_stats_set_user_time_ms10(&ctx->titleStats, tic_ms10, scn_ms10, bdr_ms10, total_ms10);
+}
+
+void ticbuild_remoting_set_user_time_ticks(TicbuildRemoting* ctx, uint64_t total_ticks, uint64_t timing_freq)
+{
+    if(!ctx) return;
+
+    tb_title_stats_set_user_time_ticks(&ctx->titleStats, total_ticks, timing_freq);
 }
 
 void ticbuild_remoting_set_lua_perf(TicbuildRemoting* ctx, uint64_t tic_cycles, uint64_t scn_cycles, uint64_t bdr_cycles, uint64_t lua_gc_mem_bytes)

@@ -97,6 +97,20 @@ static uint64_t tb_round_u64(double value)
     return (uint64_t)(value + TB_PERF_ROUND_EPS);
 }
 
+static double tb_uncapped_fps_from_metrics(const tb_perf_metrics* metrics)
+{
+    if(!metrics)
+        return 0.0;
+
+    if(metrics->total_ticks > 0 && metrics->timing_freq > 0)
+        return (double)metrics->timing_freq / (double)metrics->total_ticks;
+
+    if(metrics->total_ms10 == 0)
+        return 0.0;
+
+    return (double)((10000U + (metrics->total_ms10 / 2U)) / metrics->total_ms10);
+}
+
 static void tb_format_u64(char* out, size_t cap, uint64_t value)
 {
     if(!out || cap == 0) return;
@@ -595,7 +609,6 @@ void ticbuild_perf_hud_init(tb_perf_hud_state* state)
 {
     if(!state) return;
     memset(state, 0, sizeof *state);
-    tb_fps_init(&state->fps);
     state->graph_speed = TB_PERF_GRAPH_SPEED_DEFAULT;
     state->graph_width = TB_PERF_GRAPH_WIDTH_DEFAULT;
     state->graph_height = TB_PERF_GRAPH_HEIGHT_DEFAULT;
@@ -673,9 +686,8 @@ void ticbuild_perf_hud_draw(
     if(!tic || !state || !metrics) return;
     if(!run_mode) return;
 
-    tb_fps_on_frame(&state->fps, counter, freq);
     double raw[TB_PERF_METRIC_COUNT];
-    raw[TB_METRIC_FPS] = tb_fps_get_value(&state->fps);
+    raw[TB_METRIC_FPS] = tb_uncapped_fps_from_metrics(metrics);
     raw[TB_METRIC_MEM] = (double)metrics->lua_mem_bytes / TB_PERF_KB_DIV;
     raw[TB_METRIC_TIC] = (double)metrics->tic_cycles / TB_PERF_KC_DIV;
     raw[TB_METRIC_SCN_BDR] = (double)(metrics->scn_cycles + metrics->bdr_cycles) / TB_PERF_KC_DIV;

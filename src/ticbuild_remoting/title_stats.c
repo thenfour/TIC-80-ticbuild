@@ -14,6 +14,14 @@ static unsigned tb_round_kb(uint64_t bytes)
     return (unsigned)((bytes + 512ULL) / 1024ULL);
 }
 
+static int tb_uncapped_fps_from_timing(uint64_t total_ticks, uint64_t timing_freq)
+{
+    if(total_ticks == 0 || timing_freq == 0)
+        return 0;
+
+    return (int)((timing_freq + (total_ticks / 2ULL)) / total_ticks);
+}
+
 void tb_title_stats_on_frame(tb_title_stats* stats, uint64_t counter, uint64_t freq)
 {
     if(!stats) return;
@@ -29,7 +37,13 @@ int tb_title_stats_get_fps(const tb_title_stats* stats)
 
 int tb_title_stats_get_uncapped_fps(const tb_title_stats* stats)
 {
-    if(!stats || stats->total_ms10 == 0)
+    if(!stats)
+        return 0;
+
+    if(stats->total_ticks > 0 && stats->timing_freq > 0)
+        return tb_uncapped_fps_from_timing(stats->total_ticks, stats->timing_freq);
+
+    if(stats->total_ms10 == 0)
         return 0;
 
     return (int)((10000U + (stats->total_ms10 / 2U)) / stats->total_ms10);
@@ -48,6 +62,18 @@ void tb_title_stats_set_user_time_ms10(tb_title_stats* stats, uint32_t tic_ms10,
         stats->scn_ms10 = scn_ms10;
         stats->bdr_ms10 = bdr_ms10;
         stats->total_ms10 = total_ms10;
+        stats->dirty = true;
+    }
+}
+
+void tb_title_stats_set_user_time_ticks(tb_title_stats* stats, uint64_t total_ticks, uint64_t timing_freq)
+{
+    if(!stats) return;
+
+    if(stats->total_ticks != total_ticks || stats->timing_freq != timing_freq)
+    {
+        stats->total_ticks = total_ticks;
+        stats->timing_freq = timing_freq;
         stats->dirty = true;
     }
 }
