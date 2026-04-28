@@ -359,3 +359,63 @@ way to synergize. Disabling existing hook is impossible because it's important i
 even during profiling.
 
 The existing hook interval is `TB_LUA_HOOK_STEP = 1000`.
+
+## Example
+
+**First, be running this fork of TIC-80 with a cart**
+
+**Launch remote terminal**
+
+easiest way is
+
+```
+> ticbuild terminal
+```
+
+which will automatically connect, via the discovery protocol
+
+**Begin profiling**
+
+Let's do a timed 10-second profile...
+
+```
+0 lua_profiler_start "wallclock" 1000 50 4
+```
+
+Which returns:
+
+```
+0 OK auto_stop=1,duration=4,output_path="C:\\Users\\carl\\AppData\\Local\\Temp\\tic80-lua-profiler-34672.txt"
+```
+
+This samples on a host time cadence, checking every 1000 lua instructions if the
+50 microsecond sample is due.
+
+Sample collection happens over 4 seconds, and then stops automatically, placing the
+file. This is done silently; remoting clients don't get a notification that profiling has
+stopped.
+
+**Checking on status**
+
+```
+0 lua_profiler_status
+```
+
+While the auto-stopping profile session is capturing, the response can be like,
+
+```
+0 OK running=1,auto_stop=1,mode=wallclock,instruction_interval=1000,
+wall_clock_period_micros=50,elapsed_seconds=1,duration=4,remaining_seconds=3,
+output_path="C:\\Users\\carl\\AppData\\Local\\Temp\\tic80-lua-profiler-34672.txt"
+```
+
+Notably, `remaining_seconds` can be used by clients to know how much time
+is left in the capture session.
+
+Also note: output_path is not sticky; after the file is written, this status goes back
+to:
+
+```
+> 0 lua_profiler_status
+0 OK running=0,auto_stop=0
+```
