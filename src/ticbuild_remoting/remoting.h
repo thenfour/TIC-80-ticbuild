@@ -43,6 +43,11 @@ extern "C"
 
     void ticbuild_remoting_tick(TicbuildRemoting* ctx);
 
+    // Queue an event for clients subscribed to `event_type`.
+    // `data` is optional protocol-formatted event payload text.
+    void ticbuild_remoting_emit_event(TicbuildRemoting* ctx, const char* event_type, const char* data);
+    void ticbuild_remoting_emit_trace(TicbuildRemoting* ctx, const char* text);
+
     // Per-frame timing hook (call once per rendered frame).
     // `counter`/`freq` should come from tic_sys_counter_get()/tic_sys_freq_get().
     void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq);

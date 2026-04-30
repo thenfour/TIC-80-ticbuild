@@ -238,6 +238,9 @@ void studioRomLoaded(Studio* studio);
 void studioRomSaved(Studio* studio);
 void studioConfigChanged(Studio* studio);
 void studioRemotingCartLoaded(Studio* studio);
+void studioRemotingTrace(Studio* studio, const char* text);
+void studioRemotingCartRun(Studio* studio);
+void studioRemotingLuaProfilerStopped(Studio* studio);
 
 void setStudioMode(Studio* studio, EditorMode mode);
 EditorMode getStudioMode(Studio* studio);

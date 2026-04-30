@@ -3980,6 +3980,7 @@ static void error(Console* console, const char* info)
 
 static void trace(Console* console, const char* text, u8 color)
 {
+    studioRemotingTrace(console->studio, text);
     consolePrint(console, text, color);
     commandDone(console);
 }

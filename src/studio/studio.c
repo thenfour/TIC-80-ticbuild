@@ -378,6 +378,24 @@ void studioRemotingCartLoaded(Studio* studio)
     remoting_note_cart_loaded(studio, true);
 }
 
+void studioRemotingTrace(Studio* studio, const char* text)
+{
+    if(studio && studio->remoting)
+        ticbuild_remoting_emit_trace(studio->remoting, text);
+}
+
+void studioRemotingCartRun(Studio* studio)
+{
+    if(studio && studio->remoting)
+        ticbuild_remoting_emit_event(studio->remoting, "cart_run", NULL);
+}
+
+void studioRemotingLuaProfilerStopped(Studio* studio)
+{
+    if(studio && studio->remoting)
+        ticbuild_remoting_emit_event(studio->remoting, "lua_profiler_stopped", NULL);
+}
+
 static void remoting_note_cart_launched(Studio* studio)
 {
     if(!remoting_has_current_cart(studio))
@@ -2136,6 +2154,7 @@ void runGame(Studio* studio)
 {
 #if defined(BUILD_EDITORS)
     remoting_note_cart_launched(studio);
+    studioRemotingCartRun(studio);
 
     if (studio->config->data.fft) {
         // initialize FFT data structures
@@ -3159,7 +3178,10 @@ void studio_tick(Studio* studio, tic80_input input)
             if(!ticbuild_lua_profiler_tick(tic, saved_path, sizeof saved_path, profiler_err, sizeof profiler_err))
                 printf("[remoting] lua profiler auto-stop failed: %s\n", profiler_err[0] ? profiler_err : "error");
             else if(saved_path[0])
+            {
                 printf("[remoting] lua profiler auto-stop saved: %s\n", saved_path);
+                studioRemotingLuaProfilerStopped(studio);
+            }
         }
 
         if(studio->remoting)

@@ -19,6 +19,14 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, bo
 
 void ticbuild_remoting_close(TicbuildRemoting* ctx) { (void)ctx; }
 void ticbuild_remoting_tick(TicbuildRemoting* ctx) { (void)ctx; }
+void ticbuild_remoting_emit_event(TicbuildRemoting* ctx, const char* event_type, const char* data)
+{
+    (void)ctx; (void)event_type; (void)data;
+}
+void ticbuild_remoting_emit_trace(TicbuildRemoting* ctx, const char* text)
+{
+    (void)ctx; (void)text;
+}
 
 void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq) { (void)ctx; (void)counter; (void)freq; }
 int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx) { (void)ctx; return 0; }
@@ -59,6 +67,7 @@ typedef SOCKET tb_socket;
 # define tb_close_socket closesocket
 static int tb_last_socket_error(void) { return WSAGetLastError(); }
 static bool tb_would_block(int err) { return err == WSAEWOULDBLOCK; }
+static void tb_text_response_init(tb_text_buffer* buf);
 
 /* just make these huge; there's not much reason in a windows x64 env to restrict. */
 enum { TB_INBUF_LIMIT = 1024 * 1024 * 10 /* 10 MB */ };
@@ -71,6 +80,14 @@ enum { TB_RESPONSE_TEXT_LIMIT = TB_TEXT_LINE_LIMIT > TB_RESPONSE_TEXT_HEADROOM ?
 enum { TB_PEEK_LIMIT = TB_TEXT_LINE_LIMIT > TB_BYTES_RESPONSE_HEADROOM ? (TB_TEXT_LINE_LIMIT - TB_BYTES_RESPONSE_HEADROOM) / 3 : 0 };
 enum { TB_MAX_CLIENTS = 10 };
 
+typedef enum
+{
+    TB_EVENT_NONE = 0,
+    TB_EVENT_TRACE = 1u << 0,
+    TB_EVENT_CART_RUN = 1u << 1,
+    TB_EVENT_LUA_PROFILER_STOPPED = 1u << 2,
+} tb_event_flags;
+
 typedef struct
 {
     tb_socket sock;
@@ -81,6 +98,8 @@ typedef struct
     char* outbuf;
     size_t outlen;
     size_t outpos;
+
+    uint32_t subscribed_events;
 } tb_client;
 
 struct TicbuildRemoting
@@ -94,6 +113,7 @@ struct TicbuildRemoting
     tb_title_stats titleStats;
     bool profiler_active;
     uint32_t profiler_elapsed_seconds;
+    int64_t next_event_id;
 
     // Title/status tracking
     bool title_dirty;
@@ -314,6 +334,149 @@ static void tb_queue_output(tb_client* client, const char* s, size_t n)
     client->outlen += n;
 }
 
+static uint32_t tb_event_flag_from_name_len(const char* name, size_t len)
+{
+    if(!name) return TB_EVENT_NONE;
+    if(len == 5 && memcmp(name, "trace", len) == 0) return TB_EVENT_TRACE;
+    if(len == 8 && memcmp(name, "cart_run", len) == 0) return TB_EVENT_CART_RUN;
+    if(len == 20 && memcmp(name, "lua_profiler_stopped", len) == 0) return TB_EVENT_LUA_PROFILER_STOPPED;
+    return TB_EVENT_NONE;
+}
+
+static uint32_t tb_event_flag_from_name(const char* name)
+{
+    return name ? tb_event_flag_from_name_len(name, strlen(name)) : TB_EVENT_NONE;
+}
+
+static bool tb_parse_event_flags(const char* names, uint32_t* out)
+{
+    if(!names || !out) return false;
+
+    uint32_t flags = TB_EVENT_NONE;
+    const char* start = names;
+
+    for(const char* p = names;; p++)
+    {
+        if(*p == '|' || *p == '\0')
+        {
+            size_t len = (size_t)(p - start);
+            uint32_t flag = tb_event_flag_from_name_len(start, len);
+            if(len == 0 || flag == TB_EVENT_NONE)
+                return false;
+
+            flags |= flag;
+
+            if(*p == '\0')
+                break;
+
+            start = p + 1;
+        }
+    }
+
+    *out = flags;
+    return true;
+}
+
+static const char* tb_event_name(uint32_t kind)
+{
+    switch(kind)
+    {
+    case TB_EVENT_TRACE: return "trace";
+    case TB_EVENT_CART_RUN: return "cart_run";
+    case TB_EVENT_LUA_PROFILER_STOPPED: return "lua_profiler_stopped";
+    default: return NULL;
+    }
+}
+
+static int64_t tb_next_event_id(TicbuildRemoting* ctx)
+{
+    int64_t id = ctx->next_event_id;
+    ctx->next_event_id = (ctx->next_event_id == INT64_MIN) ? -1 : (ctx->next_event_id - 1);
+    return id;
+}
+
+static void tb_emit_event_kind(TicbuildRemoting* ctx, uint32_t kind, const char* data)
+{
+    if(!ctx || kind == TB_EVENT_NONE) return;
+
+    const char* event_name = tb_event_name(kind);
+    if(!event_name) return;
+
+    bool any = false;
+    for(int i = 0; i < TB_MAX_CLIENTS; i++)
+    {
+        tb_client* client = &ctx->clients[i];
+        if(client->sock != TB_INVALID_SOCKET && (client->subscribed_events & kind))
+        {
+            any = true;
+            break;
+        }
+    }
+
+    if(!any)
+        return;
+
+    size_t event_len = strlen(event_name);
+    size_t data_len = (data && data[0]) ? strlen(data) : 0;
+    size_t line_cap = 64 + event_len + (data_len ? 1 + data_len : 0) + 2;
+    if(line_cap > TB_TEXT_LINE_LIMIT)
+        return;
+
+    char* line = (char*)malloc(line_cap);
+    if(!line) return;
+
+    int64_t id = tb_next_event_id(ctx);
+    int wrote = snprintf(line, line_cap, "%lld %s", (long long)id, event_name);
+    if(wrote < 0)
+    {
+        free(line);
+        return;
+    }
+
+    size_t pos = (size_t)wrote;
+    if(pos >= line_cap)
+    {
+        free(line);
+        return;
+    }
+
+    if(data_len)
+    {
+        line[pos++] = ' ';
+        memcpy(line + pos, data, data_len);
+        pos += data_len;
+    }
+
+    line[pos++] = '\n';
+
+    for(int i = 0; i < TB_MAX_CLIENTS; i++)
+    {
+        tb_client* client = &ctx->clients[i];
+        if(client->sock != TB_INVALID_SOCKET && (client->subscribed_events & kind))
+            tb_queue_output(client, line, pos);
+    }
+
+    free(line);
+}
+
+void ticbuild_remoting_emit_event(TicbuildRemoting* ctx, const char* event_type, const char* data)
+{
+    tb_emit_event_kind(ctx, tb_event_flag_from_name(event_type), data);
+}
+
+void ticbuild_remoting_emit_trace(TicbuildRemoting* ctx, const char* text)
+{
+    if(!ctx) return;
+
+    tb_text_buffer out;
+    char err[128] = {0};
+    const char* trace_text = text ? text : "";
+    tb_text_response_init(&out);
+    if(tb_text_buffer_append_quoted(&out, trace_text, strlen(trace_text), err, sizeof err))
+        ticbuild_remoting_emit_event(ctx, "trace", tb_text_buffer_data(&out));
+    tb_text_buffer_dispose(&out);
+}
+
 static void tb_send_response_str(tb_client* client, int64_t id, bool ok, const char* data)
 {
     char prefix[64];
@@ -512,6 +675,7 @@ static void tb_disconnect_client(TicbuildRemoting* ctx, int index)
     free(client->outbuf);
     client->inbuf = NULL;
     client->outbuf = NULL;
+    client->subscribed_events = TB_EVENT_NONE;
 }
 
 static void tb_accept_client(TicbuildRemoting* ctx)
@@ -550,6 +714,7 @@ static void tb_accept_client(TicbuildRemoting* ctx)
         ctx->clients[slot].inlen = 0;
         ctx->clients[slot].outlen = 0;
         ctx->clients[slot].outpos = 0;
+        ctx->clients[slot].subscribed_events = TB_EVENT_NONE;
         ctx->client_count++;
         tb_mark_title_dirty(ctx);
     }
@@ -667,6 +832,11 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         tb_send_response_str(client, 0, false, "invalid id");
         return;
     }
+    if(id < 0)
+    {
+        tb_send_response_str(client, 0, false, "invalid id");
+        return;
+    }
 
     if(!tb_next_token(&p, &len, &tok, err, sizeof err))
     {
@@ -764,6 +934,40 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
 
         tb_free_args(args, argc);
         tb_send_response_str(client, id, true, data);
+        return;
+    }
+
+    if(strcmp(cmd, "event_subscribe") == 0)
+    {
+        if(argc != 2 || args[0].type != TB_ARG_STR || args[1].type != TB_ARG_INT)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> event_subscribe \"event_type[|event_type...]\" <enabled:1|0>");
+            return;
+        }
+
+        uint32_t flags = TB_EVENT_NONE;
+        if(!tb_parse_event_flags(args[0].v.s.ptr, &flags))
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "unknown event type");
+            return;
+        }
+
+        if(args[1].v.i != 0 && args[1].v.i != 1)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "enabled must be 1 or 0");
+            return;
+        }
+
+        if(args[1].v.i)
+            client->subscribed_events |= flags;
+        else
+            client->subscribed_events &= ~flags;
+
+        tb_free_args(args, argc);
+        tb_send_response_str(client, id, true, NULL);
         return;
     }
 
@@ -1140,6 +1344,8 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         if(ok)
             ticbuild_remoting_set_profiler_state(ctx, false, 0);
         tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        if(ok)
+            ticbuild_remoting_emit_event(ctx, "lua_profiler_stopped", NULL);
         tb_text_buffer_dispose(&out);
         return;
     }
@@ -1302,6 +1508,7 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, bo
     ctx->listen_sock = TB_INVALID_SOCKET;
     ctx->client_count = 0;
     ctx->last_client_count = 0;
+    ctx->next_event_id = -1;
     for(int i = 0; i < TB_MAX_CLIENTS; i++)
     {
         ctx->clients[i].sock = TB_INVALID_SOCKET;
@@ -1310,6 +1517,7 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, bo
         ctx->clients[i].outbuf = NULL;
         ctx->clients[i].outlen = 0;
         ctx->clients[i].outpos = 0;
+        ctx->clients[i].subscribed_events = TB_EVENT_NONE;
     }
 
     char err[128];

@@ -68,7 +68,8 @@ binds to `127.0.0.1`. Up to 10 clients supported.
 - dead-simple, no optional args or multiple datatypes if possible.
 - requests
   - each line in the form `<id> <command> <args...>`
-    - `id` is an id used to pair responses with requests
+    - `id` is an id used to pair responses with requests. `id` must be integral number, and non-negative (>=0).
+      Invalid/negative IDs won't echo back to clients; id will be `0` in that case. (`-1 hello` will give response `0 ERR "invalid id"`)
     - example: `1 sync 24`
     - example: `1 poke 0x8fff <24 ff c0>`
       - this `<xx ...>` syntax allows representing binary data in hex byte form
@@ -121,6 +122,11 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       specified path (otherwise one is auto-generated)
       See below for performance profiler instructions.
     - `lua_profiler_status` - returns the status of the lua profiler
+    - `event_subscribe <event_type|event_type> <enabled:1|0>` - set client subscription status for event types.
+      Specify the event types to affect; they can be combined with pipe char `|`. Enable subscription to the
+      types with `1`; `0` will unsubscribe. Event types that aren't specified here are unaffected.
+      Example: `0 event_subscribe "trace|cart_run" 1` enables
+      receiving `trace()` and cart run events pushed from server to client (and other event types remain unaffected)
   - datatypes
     - numbers (integral, negative, decimal)
       - No fancy `1e3` forms
@@ -146,10 +152,18 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       - `1 ping` => `1 OK PONG`
       - `44 sync 24` => `44 OK`
       - `xx` => `0 ERR "error description here"`
-  - (not currently needed; theoretical) events: `@ <eventtype> <data...>`
-    - server can send event messages to the client using similar format, but the
-      message id is `@`. Datatype semantics remain. Examples:
-      - `@ trace "hello from tic80"`
+  - events (pushed from server to client): `<-id> <eventtype> <data...>`
+    - server can send event messages to the client using similar message format. The
+      message id is a negative integer (e.g. `-243`). Datatype syntax remains.
+      Note that clients will only receive event types they subscribe to via `event_subscribe`
+      explicitly; by default clients do not receive any events. Event subscription is
+      per-client; if client A subscribes, then only it receives the event; it doesn't
+      affect other clients. No guarantees are made about ids being in a particular order,
+      having gaps, or duplicates (though reasonably speaking there won't be duplicates due to int64 numeric range).
+      Examples of received events:
+      - `-1 trace "hello from tic80"` sent for all `trace()` Lua calls.
+      - `-2 cart_run` sent when cart is launched / game is run (ctrl+R)
+      - `-3 lua_profiler_stopped` sent when the lua profiler finishes
       - (this is the only one supported so far)
 - Commands to be queued and executed at a deterministic safe point in the
   TIC-80 system loop (e.g., between frames if the cart is running)
