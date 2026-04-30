@@ -237,6 +237,7 @@ tic_cartridge* loadPngCart(png_buffer buffer);
 void studioRomLoaded(Studio* studio);
 void studioRomSaved(Studio* studio);
 void studioConfigChanged(Studio* studio);
+void studioRemotingCartLoaded(Studio* studio);
 
 void setStudioMode(Studio* studio, EditorMode mode);
 EditorMode getStudioMode(Studio* studio);

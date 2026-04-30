@@ -1060,6 +1060,31 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         return;
     }
 
+    if(strcmp(cmd, "status") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> status");
+            return;
+        }
+
+        if(!ctx->cb.status)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "status not supported");
+            return;
+        }
+
+        tb_text_buffer out;
+        tb_text_response_init(&out);
+        bool ok = ctx->cb.status(ctx->cb.userdata, &out, err, sizeof err);
+        tb_free_args(args, argc);
+        tb_send_response_str(client, id, ok, ok ? tb_text_buffer_data(&out) : err);
+        tb_text_buffer_dispose(&out);
+        return;
+    }
+
     if(strcmp(cmd, "lua_profiler_start") == 0)
     {
         if(argc < 3 || argc > 5 || args[0].type != TB_ARG_STR || args[1].type != TB_ARG_INT || args[2].type != TB_ARG_INT

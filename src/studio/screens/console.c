@@ -823,6 +823,7 @@ static void onLoadDemoCommandConfirmed(Console* console, const tic_script* scrip
     tic_cart_load(&console->tic->cart, data, size);
     tic_api_reset(console->tic);
 
+    studioRemotingCartLoaded(console->studio);
     studioRomLoaded(console->studio);
 
     printBack(console, "\ncart ");
@@ -839,6 +840,7 @@ static void onCartLoaded(Console* console, const char* name, const char* section
     if(!section)
         setCartName(console, name, tic_fs_path(console->fs, name));
 
+    studioRemotingCartLoaded(console->studio);
     studioRomLoaded(console->studio);
 
     printBack(console, "\ncart ");
@@ -873,6 +875,7 @@ static void updateProject(Console* console)
 #endif
                 tic_cart_load(&tic->cart, data, size);
 
+            studioRemotingCartLoaded(console->studio);
             studioRomLoaded(console->studio);
         }
     }
@@ -4464,7 +4467,10 @@ static bool cmdLoadCart(Console* console, const char* path)
     }
 
     if(done)
+    {
+        studioRemotingCartLoaded(console->studio);
         studioRomLoaded(console->studio);
+    }
 
     return done;
 }

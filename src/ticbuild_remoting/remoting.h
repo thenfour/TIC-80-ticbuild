@@ -29,6 +29,7 @@ extern "C"
         bool (*eval)(void* userdata, const char* code, char* err, size_t errcap);
         bool (*eval_expr)(void* userdata, const char* expr, tb_text_buffer* out, char* err, size_t errcap);
         bool (*list_globals)(void* userdata, tb_text_buffer* out, char* err, size_t errcap);
+        bool (*status)(void* userdata, tb_text_buffer* out, char* err, size_t errcap);
         bool (*cart_path)(void* userdata, tb_text_buffer* out, char* err, size_t errcap);
         bool (*fs_path)(void* userdata, tb_text_buffer* out, char* err, size_t errcap);
         bool (*metadata)(void* userdata, const char* key, tb_text_buffer* out, char* err, size_t errcap);

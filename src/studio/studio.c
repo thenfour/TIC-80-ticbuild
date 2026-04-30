@@ -28,6 +28,7 @@
 #include <windows.h>
 #else
 #include <sys/time.h>
+#include <unistd.h>
 #endif
 
 #include "editors/code.h"
@@ -241,6 +242,12 @@ struct Studio
     tb_title_stats titleStats;
     uint64_t title_last_counter;
     bool title_pending;
+    uint64_t remoting_process_started_at;
+    uint64_t remoting_cart_loaded_at;
+    uint64_t remoting_cart_last_launch_at;
+    CartHash remoting_cart_hash;
+    bool remoting_cart_hash_valid;
+    char remoting_cart_path[TICNAME_MAX];
 
     Bytebattle bytebattle;
 
@@ -265,6 +272,102 @@ static void emptyDone(void* data) {}
 
 // Remoting callbacks; put here so they can access studio things.
 const char* tic_tool_metatag(const char* code, const char* tag, const char* comment);
+static void md5(const void* voidData, s32 length, u8 digest[MD5_HASHSIZE]);
+
+static uint64_t remoting_unix_epoch_ms(void)
+{
+#if defined(_WIN32)
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+
+    ULARGE_INTEGER uli;
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+
+    return (uint64_t)((uli.QuadPart - UNIX_EPOCH_IN_FILETIME) / 10000ULL);
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
+#endif
+}
+
+static uint64_t remoting_unique_time_after(uint64_t now, uint64_t previous)
+{
+    return now <= previous ? previous + 1 : now;
+}
+
+static unsigned long remoting_process_id(void)
+{
+#if defined(_WIN32)
+    return (unsigned long)GetCurrentProcessId();
+#else
+    return (unsigned long)getpid();
+#endif
+}
+
+static bool remoting_cart_loaded(const Studio* studio)
+{
+    return studio && studio->console && studio->console->rom.name[0];
+}
+
+static void remoting_note_cart_loaded(Studio* studio, bool force)
+{
+    if(!studio)
+        return;
+
+    if(!remoting_cart_loaded(studio))
+    {
+        studio->remoting_cart_loaded_at = 0;
+        studio->remoting_cart_last_launch_at = 0;
+        studio->remoting_cart_hash_valid = false;
+        studio->remoting_cart_path[0] = '\0';
+        return;
+    }
+
+    CartHash hash;
+    md5(&studio->tic->cart, sizeof(tic_cartridge), hash.data);
+
+    const char* path = studio->console->rom.path;
+    if(!path) path = "";
+
+    bool changed = force
+        || !studio->remoting_cart_hash_valid
+        || memcmp(hash.data, studio->remoting_cart_hash.data, sizeof hash.data) != 0
+        || strcmp(path, studio->remoting_cart_path) != 0;
+
+    if(!changed)
+        return;
+
+    uint64_t ts = remoting_unique_time_after(remoting_unix_epoch_ms(), studio->remoting_cart_loaded_at);
+    studio->remoting_cart_loaded_at = ts;
+    studio->remoting_cart_last_launch_at = 0;
+    studio->remoting_cart_hash = hash;
+    studio->remoting_cart_hash_valid = true;
+    snprintf(studio->remoting_cart_path, sizeof studio->remoting_cart_path, "%s", path);
+}
+
+void studioRemotingCartLoaded(Studio* studio)
+{
+    remoting_note_cart_loaded(studio, true);
+}
+
+static void remoting_note_cart_launched(Studio* studio)
+{
+    if(!remoting_cart_loaded(studio))
+    {
+        if(studio)
+            studio->remoting_cart_last_launch_at = 0;
+        return;
+    }
+
+    remoting_note_cart_loaded(studio, false);
+    uint64_t previous = studio->remoting_cart_last_launch_at;
+    if(studio->remoting_cart_loaded_at > previous)
+        previous = studio->remoting_cart_loaded_at;
+    studio->remoting_cart_last_launch_at = remoting_unique_time_after(remoting_unix_epoch_ms(), previous);
+}
+
 static void remoting_hello(void* userdata, char* out, size_t outcap)
 {
     (void)userdata;
@@ -505,6 +608,40 @@ static bool remoting_metadata(void* userdata, const char* key, tb_text_buffer* o
         value = tic_tool_metatag(studio->tic->cart.code.data, key, NULL);
 
     return tb_text_buffer_append_quoted(out, value ? value : "", strlen(value ? value : ""), err, errcap);
+}
+
+static bool remoting_status(void* userdata, tb_text_buffer* out, char* err, size_t errcap)
+{
+    Studio* studio = (Studio*)userdata;
+
+    if(!studio)
+    {
+        tb_set_err(err, errcap, "status not available");
+        return false;
+    }
+
+    if(!out)
+    {
+        tb_set_err(err, errcap, "missing output buffer");
+        return false;
+    }
+
+    remoting_note_cart_loaded(studio, false);
+
+    char data[256];
+    snprintf(data, sizeof data,
+        "cart_loaded_at=%llu,"
+        "cart_last_launch_at=%llu,"
+        "now=%llu,"
+        "process_started_at=%llu,"
+        "pid=%lu",
+        (unsigned long long)studio->remoting_cart_loaded_at,
+        (unsigned long long)studio->remoting_cart_last_launch_at,
+        (unsigned long long)remoting_unix_epoch_ms(),
+        (unsigned long long)studio->remoting_process_started_at,
+        remoting_process_id());
+
+    return tb_text_buffer_append_cstr(out, data, err, errcap);
 }
 
 static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, uint32_t duration_seconds, const char* output_path, tb_text_buffer* out, char* err, size_t errcap)
@@ -1952,6 +2089,7 @@ void studioRomSaved(Studio* studio)
 
 void studioRomLoaded(Studio* studio)
 {
+    remoting_note_cart_loaded(studio, false);
     initModules(studio);
 
     updateTitle(studio);
@@ -1971,6 +2109,7 @@ bool studioCartChanged(Studio* studio)
 void runGame(Studio* studio)
 {
 #if defined(BUILD_EDITORS)
+    remoting_note_cart_launched(studio);
 
     if (studio->config->data.fft) {
         // initialize FFT data structures
@@ -3404,6 +3543,10 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .perfHudMode = TB_PERF_HUD_OFF,
         .title_last_counter = 0,
         .title_pending = false,
+        .remoting_process_started_at = remoting_unix_epoch_ms(),
+        .remoting_cart_loaded_at = 0,
+        .remoting_cart_last_launch_at = 0,
+        .remoting_cart_hash_valid = false,
 
         .bytebattle = {0},
 #endif
@@ -3519,6 +3662,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .eval = remoting_eval,
             .eval_expr = remoting_eval_expr,
             .list_globals = remoting_list_globals,
+            .status = remoting_status,
             .cart_path = remoting_cart_path,
             .fs_path = remoting_fs_path,
             .metadata = remoting_metadata,

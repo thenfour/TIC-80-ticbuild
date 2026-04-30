@@ -104,6 +104,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       without having to type `return width * size`. That can cause issues if you need
       to execute a lot of code, but always workaroundable with something like,
       `evelexpr "(function() ... end)()"`.
+    - `status` - return runtime & loaded cart status. see below.
     - `listglobals` - returns a single-line, comma-separated list of eval-able
       global symbols (identifier keys from the Lua global environment).
     - `typeschema <symbol>` - returns a type schema of the specified global symbol. see below.
@@ -423,3 +424,33 @@ to:
 > 0 lua_profiler_status
 0 OK running=0,auto_stop=0
 ```
+
+# `status` command
+
+Similar to `perf`, returns a single-line, comma-separated, `key=value` pairs.
+
+## keys
+
+- `cart_loaded_at` timestamp when the current cartridge was loaded. `0` if there's no cart.
+- `cart_last_launch_at` timestamp when the cart was last launched (ignores pausing/resuming).
+  if never launched, `0`. Also this resets when cart changes.
+- `now` current wall clock timestamp; for reference / sanity check against the other fields
+- `process_started_at` timestamp when this process was started.
+- `pid` the pid of the this process
+
+Timestamps are unix epoch.
+
+Hosts can use `cart_loaded_at` and `cart_last_launch_at` to guarantee if the
+cart has changed (note that changing Lua code requires a relaunch).
+
+```
+> 0 status
+0 OK cart_loaded_at=1767225600123,cart_last_launch_at=1767225600456,now=1767225610000,process_started_at=1767225600123,pid=1773
+```
+
+While serial generation counters would be theoretically more precise, timestamps
+are just simpler in code (`ts = time()` instead of `gen = existing_gen + 1`).
+
+Generation is also problematic if you ever compare across sessions. We want that
+`cart_loaded_at` is _always_ different on a different cart load, no matter which
+tic-80 instance did it. Simplifies client logic.
