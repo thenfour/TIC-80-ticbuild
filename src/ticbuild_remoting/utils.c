@@ -282,30 +282,101 @@ bool tb_parse_int(tb_slice tok, int64_t* out)
 {
     if(tok.len == 0) return false;
 
-    if(tok.len >= 3 && tok.ptr[0] == '0' && (tok.ptr[1] == 'x' || tok.ptr[1] == 'X'))
+    size_t i = 0;
+    bool neg = false;
+    if(tok.ptr[i] == '-')
+    {
+        neg = true;
+        i++;
+        if(i == tok.len) return false;
+    }
+
+    if(tok.len - i >= 3 && tok.ptr[i] == '0' && (tok.ptr[i + 1] == 'x' || tok.ptr[i + 1] == 'X'))
     {
         int64_t v = 0;
-        for(size_t i = 2; i < tok.len; i++)
+        for(i += 2; i < tok.len; i++)
         {
             char c = tok.ptr[i];
             uint8_t n;
-            if (!tb_hex_nibble(c, &n)) {
+            if(!tb_hex_nibble(c, &n))
                 return false;
-            }
             v = (v << 4) | n;
         }
-        *out = v;
+        *out = neg ? -v : v;
         return true;
     }
 
     int64_t v = 0;
-    for(size_t i = 0; i < tok.len; i++)
+    for(; i < tok.len; i++)
     {
         char c = tok.ptr[i];
         if(c < '0' || c > '9') return false;
         v = v * 10 + (c - '0');
     }
-    *out = v;
+    *out = neg ? -v : v;
+    return true;
+}
+
+bool tb_parse_number(tb_slice tok, tb_arg* out)
+{
+    if(tok.len == 0 || !out) return false;
+
+    int64_t iv = 0;
+    if(tb_parse_int(tok, &iv))
+    {
+        *out = (tb_arg){TB_ARG_INT, {.i = iv}};
+        return true;
+    }
+
+    size_t i = 0;
+    if(tok.ptr[i] == '-')
+    {
+        i++;
+        if(i == tok.len) return false;
+    }
+
+    bool saw_dot = false;
+    bool saw_digit = false;
+    for(; i < tok.len; i++)
+    {
+        char c = tok.ptr[i];
+        if(c >= '0' && c <= '9')
+        {
+            saw_digit = true;
+            continue;
+        }
+
+        if(c == '.' && !saw_dot)
+        {
+            saw_dot = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    if(!saw_dot || !saw_digit)
+        return false;
+
+    char buf[128];
+    char* tmp = buf;
+    if(tok.len >= sizeof buf)
+    {
+        tmp = (char*)malloc(tok.len + 1);
+        if(!tmp) return false;
+    }
+
+    memcpy(tmp, tok.ptr, tok.len);
+    tmp[tok.len] = '\0';
+
+    char* end = NULL;
+    double n = strtod(tmp, &end);
+    bool ok = end && (size_t)(end - tmp) == tok.len;
+    if(tmp != buf) free(tmp);
+
+    if(!ok) return false;
+
+    *out = (tb_arg){TB_ARG_NUMBER, {.n = n}};
     return true;
 }
 

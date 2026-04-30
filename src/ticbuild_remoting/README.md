@@ -121,10 +121,14 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       See below for performance profiler instructions.
     - `lua_profiler_status` - returns the status of the lua profiler
   - datatypes
-    - numbers
-      - Only integers for the moment. No fancy `1e3` forms, just:
-      - decimal: `1` `0` `24` `1000`
-      - hex `0xff`
+    - numbers (integral, negative, decimal)
+      - No fancy `1e3` forms
+      - integral: `1` `0` `24` `-1000`
+      - decimal: `1.011` `.1` `-123.456` `.1`
+        - leading `0` not necessary (`.1` is valid; `0.1` is also valid)
+        - trailing decimal supported (`1.` is valid)
+        - decimal on its own (no leading 0 + trailing decimal) is an error (`.`)
+      - hex `0xff` `-0x1` (always integral, prefix with `0x`).
     - strings
       - always require double quotes, ASCII-only, escape char is `\`.
     - binary, enclosed in `<` and `>`.

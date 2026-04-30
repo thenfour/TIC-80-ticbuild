@@ -5,6 +5,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <math.h>
+#include <float.h>
+#include <stdlib.h>
 
 #include <lauxlib.h>
 
@@ -72,34 +75,60 @@ static bool tb_serialize_string(const char* s, size_t len, tb_lua_ser_ctx* ctx)
 {
     if(!tb_append_char(ctx, '"')) return false;
 
-    for(size_t i = 0; i < len; i++)
+    size_t esc_len = tb_escape_string_len(s ? s : "", len);
+    char stack_buf[256];
+    char* esc = stack_buf;
+    if(esc_len + 1 > sizeof stack_buf)
     {
-        unsigned char c = (unsigned char)s[i];
-        switch(c)
+        esc = (char*)malloc(esc_len + 1);
+        if(!esc)
         {
-            case '\\': if(!tb_append_cstr(ctx, "\\\\")) return false; break;
-            case '"':  if(!tb_append_cstr(ctx, "\\\"")) return false; break;
-            case '\n': if(!tb_append_cstr(ctx, "\\n")) return false; break;
-            case '\r': if(!tb_append_cstr(ctx, "\\r")) return false; break;
-            case '\t': if(!tb_append_cstr(ctx, "\\t")) return false; break;
-            case '\b': if(!tb_append_cstr(ctx, "\\b")) return false; break;
-            case '\f': if(!tb_append_cstr(ctx, "\\f")) return false; break;
-            default:
-                if(c < 32 || c == 127)
-                {
-                    char esc[5];
-                    snprintf(esc, sizeof esc, "\\x%02X", (unsigned)c);
-                    if(!tb_append(ctx, esc, 4)) return false;
-                }
-                else
-                {
-                    if(!tb_append_char(ctx, (char)c)) return false;
-                }
-                break;
+            tb_lua_ser_set_err(ctx, "out of memory");
+            return false;
         }
     }
 
+    size_t wrote = tb_escape_string(s ? s : "", len, esc, esc_len + 1);
+    bool ok = tb_append(ctx, esc, wrote);
+    if(esc != stack_buf) free(esc);
+    if(!ok) return false;
+
     return tb_append_char(ctx, '"');
+}
+
+static bool tb_serialize_number(lua_State* lua, int index, tb_lua_ser_ctx* ctx)
+{
+#if LUA_VERSION_NUM >= 503
+    if(lua_isinteger(lua, index))
+    {
+        char buf[64];
+        snprintf(buf, sizeof buf, "%lld", (long long)lua_tointeger(lua, index));
+        return tb_append_cstr(ctx, buf);
+    }
+#endif
+
+    lua_Number n = lua_tonumber(lua, index);
+    double nd = (double)n;
+#if defined(_MSC_VER)
+    if(!_finite(nd))
+#else
+    if(!isfinite(nd))
+#endif
+    {
+        tb_lua_ser_set_err(ctx, "unsupported number value");
+        return false;
+    }
+
+    char buf[512];
+    int len = snprintf(buf, sizeof buf, "%.17f", nd);
+    if(len < 0 || (size_t)len >= sizeof buf)
+    {
+        tb_lua_ser_set_err(ctx, "number too large");
+        return false;
+    }
+
+    tb_trim_trailing_zeros(buf);
+    return tb_append_cstr(ctx, buf);
 }
 
 static bool tb_serialize_table(lua_State* lua, int index, tb_lua_ser_ctx* ctx, int depth, int visited_index)
@@ -226,13 +255,7 @@ static bool tb_serialize_value(lua_State* lua, int index, tb_lua_ser_ctx* ctx, i
         case LUA_TBOOLEAN:
             return tb_append_cstr(ctx, lua_toboolean(lua, index) ? "true" : "false");
         case LUA_TNUMBER:
-        {
-            size_t nlen = 0;
-            const char* nstr = luaL_tolstring(lua, index, &nlen);
-            bool ok = nstr && tb_append(ctx, nstr, nlen);
-            lua_pop(lua, 1);
-            return ok;
-        }
+            return tb_serialize_number(lua, index, ctx);
         case LUA_TSTRING:
         {
             size_t slen = 0;

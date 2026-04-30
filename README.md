@@ -2,9 +2,7 @@
 
 **this is a fork**, for the sake of supporting the [ticbuild](https://github.com/thenfour/ticbuild) build system.
 
-Changes here are put in branch `ticbuild-remoting`.
-
-See the full [README](https://github.com/thenfour/TIC-80-ticbuild/blob/ticbuild-remoting/src/ticbuild_remoting/README.md) for this fork.
+See the remoting [README](https://github.com/thenfour/TIC-80-ticbuild/tree/main/src/ticbuild_remoting#readme).
 
 # original readme:
 

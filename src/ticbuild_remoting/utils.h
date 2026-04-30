@@ -28,6 +28,7 @@ extern "C"
     typedef enum
     {
         TB_ARG_INT,
+        TB_ARG_NUMBER,
         TB_ARG_STR,
         TB_ARG_BYTES,
     } tb_arg_type;
@@ -38,6 +39,7 @@ extern "C"
         union
         {
             int64_t i;
+            double n;
             tb_slice s;
             struct
             {
@@ -70,6 +72,7 @@ extern "C"
     void tb_skip_whitespace(const char** sp, size_t* n);
     bool tb_hex_nibble(char c, uint8_t* out);
     bool tb_parse_int(tb_slice tok, int64_t* out);
+    bool tb_parse_number(tb_slice tok, tb_arg* out);
     bool tb_parse_quoted(const char* s, size_t n, char** out, size_t* outlen, char* err, size_t errcap);
     void tb_free_args(tb_arg* args, size_t argc);
     bool tb_next_token(const char** sp, size_t* n, tb_slice* tok, char* err, size_t errcap);

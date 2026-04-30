@@ -729,14 +729,14 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         }
         else
         {
-            int64_t v;
-            if(!tb_parse_int(atok, &v))
+            tb_arg num;
+            if(!tb_parse_number(atok, &num))
             {
                 tb_free_args(args, argc);
                 tb_send_response_str(client, id, false, "invalid number");
                 return;
             }
-            args[argc++] = (tb_arg){TB_ARG_INT, {.i = v}};
+            args[argc++] = num;
         }
     }
 
