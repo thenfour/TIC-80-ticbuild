@@ -306,29 +306,34 @@ static unsigned long remoting_process_id(void)
 #endif
 }
 
+static bool remoting_has_current_cart(const Studio* studio)
+{
+    return studio && studio->tic && studio->console;
+}
+
 static bool remoting_cart_loaded(const Studio* studio)
 {
     return studio && studio->console && studio->console->rom.name[0];
 }
 
-static void remoting_note_cart_loaded(Studio* studio, bool force)
+static bool remoting_note_current_cart(Studio* studio, bool force)
 {
     if(!studio)
-        return;
+        return false;
 
-    if(!remoting_cart_loaded(studio))
+    if(!remoting_has_current_cart(studio))
     {
         studio->remoting_cart_loaded_at = 0;
         studio->remoting_cart_last_launch_at = 0;
         studio->remoting_cart_hash_valid = false;
         studio->remoting_cart_path[0] = '\0';
-        return;
+        return false;
     }
 
     CartHash hash;
     md5(&studio->tic->cart, sizeof(tic_cartridge), hash.data);
 
-    const char* path = studio->console->rom.path;
+    const char* path = remoting_cart_loaded(studio) ? studio->console->rom.path : "";
     if(!path) path = "";
 
     bool changed = force
@@ -337,14 +342,35 @@ static void remoting_note_cart_loaded(Studio* studio, bool force)
         || strcmp(path, studio->remoting_cart_path) != 0;
 
     if(!changed)
-        return;
+        return false;
 
-    uint64_t ts = remoting_unique_time_after(remoting_unix_epoch_ms(), studio->remoting_cart_loaded_at);
-    studio->remoting_cart_loaded_at = ts;
     studio->remoting_cart_last_launch_at = 0;
     studio->remoting_cart_hash = hash;
     studio->remoting_cart_hash_valid = true;
     snprintf(studio->remoting_cart_path, sizeof studio->remoting_cart_path, "%s", path);
+
+    return true;
+}
+
+static void remoting_note_cart_loaded(Studio* studio, bool force)
+{
+    if(!studio)
+        return;
+
+    bool loaded = remoting_cart_loaded(studio);
+    bool changed = remoting_note_current_cart(studio, force || (loaded && studio->remoting_cart_loaded_at == 0));
+
+    if(!loaded)
+    {
+        studio->remoting_cart_loaded_at = 0;
+        return;
+    }
+
+    if(!changed)
+        return;
+
+    uint64_t ts = remoting_unique_time_after(remoting_unix_epoch_ms(), studio->remoting_cart_loaded_at);
+    studio->remoting_cart_loaded_at = ts;
 }
 
 void studioRemotingCartLoaded(Studio* studio)
@@ -354,14 +380,14 @@ void studioRemotingCartLoaded(Studio* studio)
 
 static void remoting_note_cart_launched(Studio* studio)
 {
-    if(!remoting_cart_loaded(studio))
+    if(!remoting_has_current_cart(studio))
     {
         if(studio)
             studio->remoting_cart_last_launch_at = 0;
         return;
     }
 
-    remoting_note_cart_loaded(studio, false);
+    remoting_note_current_cart(studio, false);
     uint64_t previous = studio->remoting_cart_last_launch_at;
     if(studio->remoting_cart_loaded_at > previous)
         previous = studio->remoting_cart_loaded_at;
