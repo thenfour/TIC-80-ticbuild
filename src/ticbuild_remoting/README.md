@@ -2,6 +2,8 @@
 
 - Remoting server
 - Frame timing and remoting display in window title and HUD (access via <kbd>ALT+0</kbd>)
+- Lua performance profiling
+- 1024kb code size support, multiple compressed code chunks
 
 # Perf HUD color scheme and thresholds
 
@@ -468,3 +470,22 @@ are just simpler in code (`ts = time()` instead of `gen = existing_gen + 1`).
 Generation is also problematic if you ever compare across sessions. We want that
 `cart_loaded_at` is _always_ different on a different cart load, no matter which
 tic-80 instance did it. Simplifies client logic.
+
+# Large code size and multiple compressed code chunks
+
+For experimenting, it's sometimes useful to want code that exceeds 512kb (don't ask).
+The 64kb `CHUNK_CODE` limit is pretty hard-coded into TIC-80 without serious
+rewiring, but we can still have large code by using an unused `temp` field on the
+`Chunk` struct as a high bit.
+
+Assemblers can now write 16 code chunks using that extra bit for indexing, and
+this build of tic80 will read them all.
+
+The result: you get 1mb of code size.
+
+Additionally, `CHUNK_CODE_ZIP` natively only supports 1 bank, but this build of
+TIC-80 can read all 8 banks of `CHUNK_CODE_ZIP`. Behavior follows
+the normal `CHUNK_CODE` conventions: concatenated in reverse bank order before
+decompressing.
+
+- Note: The zipped payload must be zero-terminated due to internal handling.

@@ -82,6 +82,11 @@ static s32 chunkSize(const Chunk* chunk)
     return chunk->size == 0 && (chunk->type == CHUNK_CODE || chunk->type == CHUNK_BINARY) ? TIC_BANK_SIZE : retro_le_to_cpu16(chunk->size);
 }
 
+static s32 chunkCodeBank(const Chunk* chunk)
+{
+    return chunk->bank | (chunk->temp << TIC_BANK_BITS);
+}
+
 static png_buffer getRawCartFromPng(png_buffer buffer)
 {
     png_buffer zip = png_decode(buffer);
@@ -176,7 +181,11 @@ void tic_cart_load(tic_cartridge* cart, const u8* buffer, s32 size)
 #endif
     }
 
-    struct CodeChunk {s32 size; const char* data;} code[TIC_BANKS] = {0};
+    struct CodeChunk {s32 size; const char* data;} code[TIC_CODE_BANKS] = {0};
+#if defined(BUILD_DEPRECATED)
+    struct CodeChunk codeZip[TIC_CODE_BANKS] = {0};
+    s32 codeZipCount = 0;
+#endif
     struct BinaryChunk {s32 size; const u8* data;} binary[TIC_BINARY_BANKS] = {0};
 
     {
@@ -202,11 +211,24 @@ void tic_cart_load(tic_cartridge* cart, const u8* buffer, s32 size)
                 binary[chunk->bank] = (struct BinaryChunk){chunkSize(chunk), ptr};
                 break;
             case CHUNK_CODE:
-                code[chunk->bank] = (struct CodeChunk){chunkSize(chunk), (char*)ptr};
+                {
+                    s32 bank = chunkCodeBank(chunk);
+                    if (bank < TIC_CODE_BANKS)
+                        code[bank] = (struct CodeChunk){chunkSize(chunk), (char*)ptr};
+                }
                 break;
 #if defined(BUILD_DEPRECATED)
             case CHUNK_CODE_ZIP:
-                tic_tool_unzip(cart->code.data, TIC_CODE_SIZE, ptr, retro_le_to_cpu16(chunk->size));
+                {
+                    s32 bank = chunkCodeBank(chunk);
+                    if (bank < TIC_CODE_BANKS)
+                    {
+                        if (!codeZip[bank].data)
+                            codeZipCount++;
+
+                        codeZip[bank] = (struct CodeChunk){retro_le_to_cpu16(chunk->size), (char*)ptr};
+                    }
+                }
                 break;
             case CHUNK_COVER_DEP:
                 {
@@ -263,7 +285,42 @@ void tic_cart_load(tic_cartridge* cart, const u8* buffer, s32 size)
             cart->binary.size = total_size;
         }
 
-        if (!*cart->code.data)
+#if defined(BUILD_DEPRECATED)
+        bool codeZipLoaded = false;
+
+        if (codeZipCount == 1)
+        {
+            FOR(const struct CodeChunk*, chunk, codeZip)
+                if (chunk->data)
+                {
+                    codeZipLoaded = tic_tool_unzip(cart->code.data, TIC_CODE_SIZE, chunk->data, chunk->size) > 0;
+                    break;
+                }
+        }
+        else if (codeZipCount > 1)
+        {
+            char* ptr = cart->code.data;
+            s32 remaining = TIC_CODE_SIZE;
+
+            RFOR(const struct CodeChunk*, chunk, codeZip)
+                if (chunk->data && remaining > 0)
+                {
+                    u32 written = tic_tool_unzip(ptr, MIN(remaining, TIC_BANK_SIZE), chunk->data, chunk->size);
+                    if (written)
+                    {
+                        ptr += written;
+                        remaining -= written;
+                        codeZipLoaded = true;
+                    }
+                }
+        }
+#endif
+
+        if (
+#if defined(BUILD_DEPRECATED)
+            !codeZipLoaded &&
+#endif
+            !*cart->code.data)
         {
             char* ptr = cart->code.data;
             RFOR(const struct CodeChunk*, chunk, code)
@@ -300,7 +357,16 @@ static u8* saveFixedChunk(u8* buffer, ChunkType type, const void* from, s32 size
 {
     if(size)
     {
-        Chunk chunk = {.type = type, .bank = bank, .size = retro_le_to_cpu16(size), .temp = 0};
+        s32 chunkBank = bank;
+        s32 chunkTemp = 0;
+
+        if (type == CHUNK_CODE)
+        {
+            chunkBank = bank & (TIC_BANKS - 1);
+            chunkTemp = bank >> TIC_BANK_BITS;
+        }
+
+        Chunk chunk = {.type = type, .bank = chunkBank, .size = retro_le_to_cpu16(size), .temp = chunkTemp};
         memcpy(buffer, &chunk, sizeof(Chunk));
         buffer += sizeof(Chunk);
 
