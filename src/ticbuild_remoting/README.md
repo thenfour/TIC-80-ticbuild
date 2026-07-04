@@ -118,7 +118,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
     - `perf` - returns current live performance metrics. see below for response
     - `metadata <key>` - returns the value for the metadata value in code.
       See: https://github.com/nesbox/TIC-80/wiki/Cartridge-Metadata.
-    - `lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros> <seconds?> <output_path?>` - Starts a
+    - `lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros> <frameMode?> <seconds?> <output_path?>` - Starts a
       Lua performance profiling session. See below for performance profiler instructions.
     - `lua_profiler_stop <output_path>`. Stops the profiler and writes the output to the optional
       specified path (otherwise one is auto-generated)
@@ -262,7 +262,7 @@ Want to see which Lua functions or lines are causing performance issues? The
 following remoting commands can be used to record stack trace samples to eventually
 view in as a flame graph.
 
-`lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros> <seconds?> <output_path?>`
+`lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros> <frameMode?> <seconds?> <output_path?>`
 
 Starts a Lua performance profiling session.
 
@@ -271,8 +271,15 @@ Starts a Lua performance profiling session.
   - `wallclock`: samples are collected every `<wallClockPeriodMicros>` microseconds
     (1000 micros = 1 millisecond). Because of the way we sample the Lua runtime,
     `<instructionInterval>` is still used here.
+- `frameMode` is optional and can be:
+  - `function`: (default) stack frames are grouped by Lua function definition.
+    best for speedscope's function-level summaries.
+  - `line`: stack frames include the source line. Can be useful for drilling into
+    hot lines, but creates a harder-to-navigate snapshot because leafs don't group together as a function.
 - `seconds` is optional and specifies the # of seconds to profile for. After this # of
   seconds has elapsed, profiling stops automatically on the next regular update/frame poll.
+  `seconds` may still be passed directly as the fourth argument when
+  `frameMode` is omitted.
 - `output_path` has the same semantics as `lua_profiler_stop`. Optional; and only
   used when `seconds` is specified. If not specified, auto-stop will choose an auto
   temp file path.
@@ -311,8 +318,8 @@ examples:
 
 ```
 running=0,auto_stop=0
-running=1,auto_stop=0,mode=instructions,instruction_interval=1000,elapsed_seconds=12
-running=1,auto_stop=1,mode=wallclock,instruction_interval=1000,wall_clock_period_micros=10,elapsed_seconds=12,duration=30,remaining_seconds=18,output_path="C:\\Users\\you\\AppData\\Local\\Temp\\tic80-lua-profiler-1234.txt"
+running=1,auto_stop=0,mode=instructions,frame_mode=function,instruction_interval=1000,elapsed_seconds=12
+running=1,auto_stop=1,mode=wallclock,frame_mode=line,instruction_interval=1000,wall_clock_period_micros=10,elapsed_seconds=12,duration=30,remaining_seconds=18,output_path="C:\\Users\\you\\AppData\\Local\\Temp\\tic80-lua-profiler-1234.txt"
 ```
 
 ## `instructions` vs. `wallclock` mode
@@ -360,6 +367,8 @@ The output is a plain text file that can be imported to [speedscope](https://git
 
 In particular the "Brendan Gregg" format is fine for us. Just line-based plain text,
 each line has a semi-colon delimited stack frames and integral sample count at the end.
+In `function` frame mode the labels are stable per Lua function, while `line` frame
+mode includes the currently executing line in each label.
 
 ```
 main;a;b;c 1

@@ -27,6 +27,7 @@ typedef struct
     bool active;
     bool auto_stop;
     tb_lua_profiler_mode mode;
+    tb_lua_profiler_frame_mode frame_mode;
     uint32_t instruction_interval;
     uint32_t wall_clock_period_micros;
     uint32_t duration_seconds;
@@ -124,6 +125,7 @@ static void tb_profiler_reset(tb_lua_profiler_session* profiler)
     profiler->active = false;
     profiler->auto_stop = false;
     profiler->mode = TB_LUA_PROFILER_MODE_OFF;
+    profiler->frame_mode = TB_LUA_PROFILER_FRAME_FUNCTION;
     profiler->instruction_interval = 0;
     profiler->wall_clock_period_micros = 0;
     profiler->duration_seconds = 0;
@@ -153,6 +155,20 @@ static tb_lua_profiler_mode tb_parse_profiler_mode(const char* mode)
     if(strcmp(mode, "instructions") == 0) return TB_LUA_PROFILER_MODE_INSTRUCTIONS;
     if(strcmp(mode, "wallclock") == 0) return TB_LUA_PROFILER_MODE_WALLCLOCK;
     return TB_LUA_PROFILER_MODE_OFF;
+}
+
+static tb_lua_profiler_frame_mode tb_parse_profiler_frame_mode(const char* frame_mode, bool* ok)
+{
+    if(ok) *ok = true;
+
+    if(!frame_mode || !frame_mode[0] || strcmp(frame_mode, "function") == 0)
+        return TB_LUA_PROFILER_FRAME_FUNCTION;
+
+    if(strcmp(frame_mode, "line") == 0)
+        return TB_LUA_PROFILER_FRAME_LINE;
+
+    if(ok) *ok = false;
+    return TB_LUA_PROFILER_FRAME_FUNCTION;
 }
 
 static int tb_internal_hook_step(const tb_lua_perf_slot* slot)
@@ -221,6 +237,49 @@ static const char* tb_profiler_normalize_src(const lua_Debug* ar)
     return ar->short_src;
 }
 
+static void tb_profiler_format_frame(char* out, size_t outcap, const lua_Debug* ar, tb_lua_profiler_frame_mode frame_mode)
+{
+    if(!out || outcap == 0)
+        return;
+
+    out[0] = '\0';
+
+    const char* src = tb_profiler_normalize_src(ar);
+    const char* name = ar && ar->name && ar->name[0] ? ar->name : NULL;
+
+    if(frame_mode == TB_LUA_PROFILER_FRAME_LINE)
+    {
+        int line = ar && ar->currentline > 0 ? ar->currentline : (ar ? ar->linedefined : 0);
+        if(name)
+            snprintf(out, outcap, "%s@%s:%d", name, src, line);
+        else
+            snprintf(out, outcap, "%s:%d", src, line);
+        return;
+    }
+
+    int line = ar && ar->linedefined > 0 ? ar->linedefined : 0;
+    bool is_main_chunk = ar && ar->what && strcmp(ar->what, "main") == 0;
+
+    if(is_main_chunk)
+    {
+        if(line > 0)
+            snprintf(out, outcap, "%s:%d", src, line);
+        else
+            snprintf(out, outcap, "%s", src);
+    }
+    else if(name)
+    {
+        if(line > 0)
+            snprintf(out, outcap, "%s@%s:%d", name, src, line);
+        else
+            snprintf(out, outcap, "%s@%s", name, src);
+    }
+    else if(line > 0)
+        snprintf(out, outcap, "anonymous@%s:%d", src, line);
+    else
+        snprintf(out, outcap, "%s", src);
+}
+
 static bool tb_profiler_append_sample(tb_lua_perf_slot* slot, const char* stack)
 {
     if(!slot || !stack || !stack[0]) return false;
@@ -265,14 +324,7 @@ static void tb_profiler_collect_sample(tb_lua_perf_slot* slot)
         if(!lua_getinfo(slot->lua, "nSl", &ar))
             break;
 
-        const char* src = tb_profiler_normalize_src(&ar);
-        int line = ar.currentline > 0 ? ar.currentline : ar.linedefined;
-
-        if(ar.name && ar.name[0])
-            snprintf(frames[frame_count], sizeof frames[frame_count], "%s@%s:%d", ar.name, src, line);
-        else
-            snprintf(frames[frame_count], sizeof frames[frame_count], "%s:%d", src, line);
-
+        tb_profiler_format_frame(frames[frame_count], sizeof frames[frame_count], &ar, slot->profiler.frame_mode);
         tb_sanitize_label(frames[frame_count]);
         frame_count++;
     }
@@ -702,6 +754,7 @@ bool ticbuild_lua_profiler_start(
     const char* mode,
     uint32_t instruction_interval,
     uint32_t wall_clock_period_micros,
+    const char* frame_mode,
     uint32_t duration_seconds,
     const char* output_path,
     char* saved_path,
@@ -713,6 +766,14 @@ bool ticbuild_lua_profiler_start(
     if(parsed_mode == TB_LUA_PROFILER_MODE_OFF)
     {
         tb_set_err(err, errcap, "invalid profiler mode");
+        return false;
+    }
+
+    bool frame_mode_ok = false;
+    tb_lua_profiler_frame_mode parsed_frame_mode = tb_parse_profiler_frame_mode(frame_mode, &frame_mode_ok);
+    if(!frame_mode_ok)
+    {
+        tb_set_err(err, errcap, "invalid profiler frame mode");
         return false;
     }
 
@@ -773,6 +834,7 @@ bool ticbuild_lua_profiler_start(
     slot->profiler.active = true;
     slot->profiler.auto_stop = duration_seconds > 0;
     slot->profiler.mode = parsed_mode;
+    slot->profiler.frame_mode = parsed_frame_mode;
     slot->profiler.instruction_interval = instruction_interval;
     slot->profiler.wall_clock_period_micros = wall_clock_period_micros;
     slot->profiler.duration_seconds = duration_seconds;
@@ -878,6 +940,7 @@ bool ticbuild_lua_profiler_get_status(tic_mem* tic, tb_lua_profiler_status* out_
     out_status->running = slot->profiler.active;
     out_status->auto_stop = slot->profiler.auto_stop;
     out_status->mode = slot->profiler.mode;
+    out_status->frame_mode = slot->profiler.frame_mode;
     out_status->instruction_interval = slot->profiler.instruction_interval;
     out_status->wall_clock_period_micros = slot->profiler.wall_clock_period_micros;
     out_status->duration_seconds = slot->profiler.duration_seconds;

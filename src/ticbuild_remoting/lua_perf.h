@@ -24,11 +24,18 @@ extern "C"
         TB_LUA_PROFILER_MODE_WALLCLOCK,
     } tb_lua_profiler_mode;
 
+    typedef enum
+    {
+        TB_LUA_PROFILER_FRAME_FUNCTION = 0,
+        TB_LUA_PROFILER_FRAME_LINE,
+    } tb_lua_profiler_frame_mode;
+
     typedef struct
     {
         bool running;
         bool auto_stop;
         tb_lua_profiler_mode mode;
+        tb_lua_profiler_frame_mode frame_mode;
         uint32_t instruction_interval;
         uint32_t wall_clock_period_micros;
         uint32_t duration_seconds;
@@ -80,6 +87,7 @@ extern "C"
         const char* mode,
         uint32_t instruction_interval,
         uint32_t wall_clock_period_micros,
+        const char* frame_mode,
         uint32_t duration_seconds,
         const char* output_path,
         char* saved_path,

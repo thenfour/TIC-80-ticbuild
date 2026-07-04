@@ -33,7 +33,7 @@ extern "C"
         bool (*cart_path)(void* userdata, tb_text_buffer* out, char* err, size_t errcap);
         bool (*fs_path)(void* userdata, tb_text_buffer* out, char* err, size_t errcap);
         bool (*metadata)(void* userdata, const char* key, tb_text_buffer* out, char* err, size_t errcap);
-        bool (*lua_profiler_start)(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, uint32_t duration_seconds, const char* output_path, tb_text_buffer* out, char* err, size_t errcap);
+        bool (*lua_profiler_start)(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, const char* frame_mode, uint32_t duration_seconds, const char* output_path, tb_text_buffer* out, char* err, size_t errcap);
         bool (*lua_profiler_stop)(void* userdata, const char* output_path, tb_text_buffer* out, char* err, size_t errcap);
         bool (*lua_profiler_status)(void* userdata, tb_text_buffer* out, char* err, size_t errcap);
     } ticbuild_remoting_callbacks;

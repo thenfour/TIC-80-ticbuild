@@ -688,7 +688,7 @@ static bool remoting_status(void* userdata, tb_text_buffer* out, char* err, size
     return tb_text_buffer_append_cstr(out, data, err, errcap);
 }
 
-static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, uint32_t duration_seconds, const char* output_path, tb_text_buffer* out, char* err, size_t errcap)
+static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32_t instruction_interval, uint32_t wall_clock_period_micros, const char* frame_mode, uint32_t duration_seconds, const char* output_path, tb_text_buffer* out, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
 
@@ -713,7 +713,7 @@ static bool remoting_lua_profiler_start(void* userdata, const char* mode, uint32
 
     char saved_path[TB_LUA_PROFILER_PATH_MAX];
     saved_path[0] = '\0';
-    if(!ticbuild_lua_profiler_start(studio->tic, mode, instruction_interval, wall_clock_period_micros, duration_seconds, output_path, saved_path, sizeof saved_path, err, errcap))
+    if(!ticbuild_lua_profiler_start(studio->tic, mode, instruction_interval, wall_clock_period_micros, frame_mode, duration_seconds, output_path, saved_path, sizeof saved_path, err, errcap))
         return false;
 
     if(duration_seconds == 0)
@@ -788,12 +788,13 @@ static bool remoting_lua_profiler_status(void* userdata, tb_text_buffer* out, ch
     }
 
     char data[256];
+    const char* frame_mode = status.frame_mode == TB_LUA_PROFILER_FRAME_LINE ? "line" : "function";
     if(!status.running)
         snprintf(data, sizeof data, "running=0,auto_stop=0");
     else if(status.mode == TB_LUA_PROFILER_MODE_WALLCLOCK)
-        snprintf(data, sizeof data, "running=1,auto_stop=%u,mode=wallclock,instruction_interval=%u,wall_clock_period_micros=%u,elapsed_seconds=%u", status.auto_stop ? 1u : 0u, status.instruction_interval, status.wall_clock_period_micros, status.elapsed_seconds);
+        snprintf(data, sizeof data, "running=1,auto_stop=%u,mode=wallclock,frame_mode=%s,instruction_interval=%u,wall_clock_period_micros=%u,elapsed_seconds=%u", status.auto_stop ? 1u : 0u, frame_mode, status.instruction_interval, status.wall_clock_period_micros, status.elapsed_seconds);
     else
-        snprintf(data, sizeof data, "running=1,auto_stop=%u,mode=instructions,instruction_interval=%u,elapsed_seconds=%u", status.auto_stop ? 1u : 0u, status.instruction_interval, status.elapsed_seconds);
+        snprintf(data, sizeof data, "running=1,auto_stop=%u,mode=instructions,frame_mode=%s,instruction_interval=%u,elapsed_seconds=%u", status.auto_stop ? 1u : 0u, frame_mode, status.instruction_interval, status.elapsed_seconds);
 
     if(!tb_text_buffer_append_cstr(out, data, err, errcap))
         return false;
