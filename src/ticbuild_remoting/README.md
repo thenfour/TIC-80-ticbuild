@@ -5,6 +5,43 @@
 - Lua performance profiling
 - 1024kb code size support, multiple compressed code chunks
 
+# Pocketpy modifications
+
+To get the project working in VS, i made changes in `pocketpy`:
+
+```
+include/pocketpy/config.h
+change from:
+#define PK_THREAD_LOCAL _Thread_local
+
+to:
+// MSVC's C compiler does not support the C11 `_Thread_local` keyword.
+// Use the native storage specifier instead.
+#if defined(_MSC_VER) && !defined(__clang__) && !defined(__cplusplus)
+    #define PK_THREAD_LOCAL __declspec(thread)
+#else
+    #define PK_THREAD_LOCAL _Thread_local
+#endif
+
+------
+include/pocketpy/objects/base.h:7
+
+change from:
+extern _Thread_local VM* pk_current_vm;
+
+to:
+extern PK_THREAD_LOCAL VM* pk_current_vm;
+
+------
+src/public/GlobalSetup.c:8
+
+change from:
+_Thread_local VM* pk_current_vm;
+
+to:
+PK_THREAD_LOCAL VM* pk_current_vm;
+```
+
 # Perf HUD color scheme and thresholds
 
 HUD colors are configured with these optional command line args:
