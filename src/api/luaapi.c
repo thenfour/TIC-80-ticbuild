@@ -21,12 +21,16 @@
 // SOFTWARE.
 
 #include "core/core.h"
+#include "luaapi.h"
 
 #include <stdlib.h>
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 #include <ctype.h>
+
+#define HMR_FN "HMR"
+#define HMR_SAVE_REGISTRY_KEY "ticbuild.hmr.save"
 
 #if defined(BUILD_EDITORS)
 #include "ticbuild_remoting/lua_perf.h"
@@ -1776,6 +1780,131 @@ static s32 docall (lua_State *lua, s32 narg, s32 nres)
     status = lua_pcall(lua, narg, nres, base);
     lua_remove(lua, base);  /* remove message handler from the stack */
     return status;
+}
+
+static void reportHmrError(tic_core* core, const char* message)
+{
+    if(core && core->data && core->data->error)
+        core->data->error(core->data->data, message ? message : "HMR failed");
+}
+
+bool luaapi_hmr_push_saved_value(tic_mem* tic)
+{
+    tic_core* core = (tic_core*)tic;
+    lua_State* lua = core ? core->currentVM : NULL;
+
+    if(!lua)
+        return false;
+
+    lua_settop(lua, 0);
+    lua_getfield(lua, LUA_REGISTRYINDEX, HMR_SAVE_REGISTRY_KEY);
+
+    if(!lua_isfunction(lua, -1))
+    {
+        lua_settop(lua, 0);
+        return false;
+    }
+
+    // Saver failures are intentionally silent: HMR continuity is best-effort
+    // and must never prevent the next cart from loading.
+    if(docall(lua, 0, 1) != LUA_OK || lua_isnil(lua, -1))
+    {
+        lua_settop(lua, 0);
+        return false;
+    }
+
+    return true;
+}
+
+luaapi_hmr_result luaapi_hmr_restore(tic_mem* tic, const char* saved, size_t savedSize, bool hasSaved)
+{
+    tic_core* core = (tic_core*)tic;
+    lua_State* lua = core ? core->currentVM : NULL;
+
+    if(!lua)
+        return LUAAPI_HMR_ERROR;
+
+    lua_settop(lua, 0);
+
+    // A VM generation gets at most one saver, installed by this HMR call.
+    lua_pushnil(lua);
+    lua_setfield(lua, LUA_REGISTRYINDEX, HMR_SAVE_REGISTRY_KEY);
+
+    lua_getglobal(lua, HMR_FN);
+    if(lua_isnil(lua, -1))
+    {
+        lua_settop(lua, 0);
+        return LUAAPI_HMR_NONE;
+    }
+
+    if(!lua_isfunction(lua, -1))
+    {
+        lua_settop(lua, 0);
+        reportHmrError(core, "HMR must be a function");
+        return LUAAPI_HMR_ERROR;
+    }
+
+    if(hasSaved)
+    {
+        static const char Prefix[] = "return ";
+        const size_t prefixSize = sizeof Prefix - 1;
+
+        if(!saved || savedSize > (size_t)-1 - prefixSize)
+        {
+            lua_settop(lua, 0);
+            reportHmrError(core, "HMR state is too large");
+            return LUAAPI_HMR_ERROR;
+        }
+
+        const size_t chunkSize = prefixSize + savedSize;
+        char* chunk = malloc(chunkSize);
+        if(!chunk)
+        {
+            lua_settop(lua, 0);
+            reportHmrError(core, "out of memory restoring HMR state");
+            return LUAAPI_HMR_ERROR;
+        }
+
+        memcpy(chunk, Prefix, prefixSize);
+        memcpy(chunk + prefixSize, saved, savedSize);
+
+        const int loadStatus = luaL_loadbuffer(lua, chunk, chunkSize, "=HMR state");
+        free(chunk);
+
+        if(loadStatus != LUA_OK || docall(lua, 0, 1) != LUA_OK)
+        {
+            const char* message = lua_tostring(lua, -1);
+            reportHmrError(core, message);
+            lua_settop(lua, 0);
+            return LUAAPI_HMR_ERROR;
+        }
+    }
+    else lua_pushnil(lua);
+
+    if(docall(lua, 1, 1) != LUA_OK)
+    {
+        const char* message = lua_tostring(lua, -1);
+        reportHmrError(core, message);
+        lua_settop(lua, 0);
+        return LUAAPI_HMR_ERROR;
+    }
+
+    if(lua_isnil(lua, -1))
+    {
+        lua_settop(lua, 0);
+        return LUAAPI_HMR_NONE;
+    }
+
+    if(!lua_isfunction(lua, -1))
+    {
+        lua_settop(lua, 0);
+        reportHmrError(core, "HMR must return a function or nil");
+        return LUAAPI_HMR_ERROR;
+    }
+
+    lua_setfield(lua, LUA_REGISTRYINDEX, HMR_SAVE_REGISTRY_KEY);
+    lua_settop(lua, 0);
+    return LUAAPI_HMR_SAVER_INSTALLED;
 }
 
 void luaapi_tick(tic_mem* tic)

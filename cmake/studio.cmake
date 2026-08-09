@@ -69,6 +69,7 @@ target_link_libraries(tic80studio PUBLIC tic80core PRIVATE zip wave_writer argpa
 
 if(BUILD_WITH_LUA OR BUILD_WITH_MOON OR BUILD_WITH_YUE OR BUILD_WITH_FENNEL)
     target_link_libraries(tic80studio PRIVATE luaapi)
+    target_compile_definitions(tic80studio PRIVATE TIC_BUILD_WITH_LUA_API)
 endif()
 
 if(USE_NAETT)

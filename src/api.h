@@ -29,11 +29,14 @@
 typedef struct { u8 index; tic_flip flip; tic_rotate rotate; } RemapResult;
 typedef void(*RemapFunc)(void*, s32 x, s32 y, RemapResult* result);
 
+typedef struct tic_mem tic_mem;
+
 typedef void(*TraceOutput)(void*, const char*, u8 color);
 typedef void(*ErrorOutput)(void*, const char*);
 typedef void(*ExitCallback)(void*);
 typedef u64(*CounterCallback)(void*);
 typedef u64(*FreqCallback)(void*);
+typedef bool(*PostBootCallback)(void*, tic_mem*); // for HMR support
 
 typedef struct
 {
@@ -46,9 +49,9 @@ typedef struct
     u64 start;
 
     void* data;
+    PostBootCallback postBoot;
 } tic_tick_data;
 
-typedef struct tic_mem tic_mem;
 typedef void(*tic_tick)(tic_mem* memory);
 typedef void(*tic_boot)(tic_mem* memory);
 typedef void(*tic_scanline)(tic_mem* memory, s32 row, void* data);

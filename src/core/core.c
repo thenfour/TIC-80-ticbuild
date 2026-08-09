@@ -482,6 +482,10 @@ void tic_core_tick(tic_mem* tic, tic_tick_data* data)
         if (done)
         {
             config->boot(tic);
+
+            if(data->postBoot && !data->postBoot(data->data, tic))
+                return;
+
             core->state.tick = config->tick;
             core->state.callback = config->callback;
             core->state.initialized = true;

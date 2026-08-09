@@ -26,6 +26,10 @@
 #include "ext/md5.h"
 #include <time.h>
 
+#if defined(TIC_BUILD_WITH_REMOTING)
+#include "core/core.h"
+#endif
+
 #if defined(BUILD_EDITORS)
 #include "ticbuild_remoting/user_timing.h"
 #endif
@@ -42,10 +46,33 @@ static void onError(void* data, const char* info)
 {
 #if defined(BUILD_EDITORS)
     Run* run = (Run*)data;
+    run->error = true;
+#if defined(TIC_BUILD_WITH_REMOTING)
+    if(((tic_core*)run->tic)->state.initialized)
+        studioHmrDiscardPending(run->studio);
+    else
+        studioHmrDiscardAll(run->studio);
+#endif
     setStudioMode(run->studio, TIC_CONSOLE_MODE);
     run->console->error(run->console, info);
 #endif
 }
+
+#if defined(TIC_BUILD_WITH_REMOTING)
+static bool onPostBoot(void* data, tic_mem* tic)
+{
+    (void)tic;
+    Run* run = (Run*)data;
+
+    if(run->error)
+    {
+        studioHmrDiscardAll(run->studio);
+        return false;
+    }
+
+    return studioHmrPostBoot(run->studio);
+}
+#endif
 
 static void onExit(void* data)
 {
@@ -114,6 +141,7 @@ static void tick(Run* run)
 //     ticbuild_user_timing_install(tic);
 // #endif
 
+    run->error = false;
     tic_core_tick(tic, &run->tickData);
 
 #if defined(BUILD_EDITORS)
@@ -156,6 +184,7 @@ void initRun(Run* run, Console* console, tic_fs* fs, Studio* studio)
         .fs = fs,
         .tick = tick,
         .exit = false,
+        .error = false,
         .tickData = (tic_tick_data)
         {
             .error = onError,
@@ -163,7 +192,10 @@ void initRun(Run* run, Console* console, tic_fs* fs, Studio* studio)
             .exit = onExit,
             .data = run,
             .counter = getCounter,
-            .freq = getFreq
+            .freq = getFreq,
+#if defined(TIC_BUILD_WITH_REMOTING)
+            .postBoot = onPostBoot,
+#endif
         },
     };
 

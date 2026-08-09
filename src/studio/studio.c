@@ -44,6 +44,10 @@
 #if defined(TIC_BUILD_WITH_REMOTING)
 #include "ticbuild_remoting/remoting.h"
 #include "ticbuild_remoting/utils.h"
+#include "ticbuild_remoting/lua_serialize.h"
+#if defined(TIC_BUILD_WITH_LUA_API)
+#include "api/luaapi.h"
+#endif
 #endif
 #include "ticbuild_remoting/title_stats.h"
 #include "ticbuild_remoting/fps.h"
@@ -253,6 +257,14 @@ struct Studio
     CartHash remoting_cart_hash;
     bool remoting_cart_hash_valid;
     char remoting_cart_path[TICNAME_MAX];
+
+    struct
+    {
+        tb_text_buffer snapshot;
+        bool snapshot_available;
+        bool delivery_pending;
+        bool saver_available;
+    } hmr;
 #endif
 
     Bytebattle bytebattle;
@@ -310,6 +322,97 @@ static unsigned long remoting_process_id(void)
 #else
     return (unsigned long)getpid();
 #endif
+}
+
+enum { HMR_SNAPSHOT_LIMIT = 1024 * 1024 };
+
+static void hmr_clear_snapshot(Studio* studio)
+{
+    if(!studio)
+        return;
+
+    tb_text_buffer_dispose(&studio->hmr.snapshot);
+    studio->hmr.snapshot_available = false;
+}
+
+static bool hmr_is_lua_runtime(Studio* studio)
+{
+#if defined(TIC_BUILD_WITH_LUA_API)
+    const tic_script* script = studio && studio->tic ? tic_get_script(studio->tic) : NULL;
+    return script && script->boot == luaapi_boot;
+#else
+    (void)studio;
+    return false;
+#endif
+}
+
+static void hmr_capture_snapshot(Studio* studio)
+{
+    tb_text_buffer candidate;
+    // tb_text_buffer's limit includes its terminating NUL; the HMR contract's
+    // one-megabyte limit applies to serialized payload bytes only.
+    tb_text_buffer_init(&candidate, HMR_SNAPSHOT_LIMIT + 1);
+
+    bool captured = false;
+#if defined(TIC_BUILD_WITH_LUA_API)
+    if(studio->hmr.saver_available && hmr_is_lua_runtime(studio))
+        captured = tb_lua_capture_hmr_state(studio->tic, &candidate);
+#endif
+
+    hmr_clear_snapshot(studio);
+
+    if(captured)
+    {
+        studio->hmr.snapshot = candidate;
+        studio->hmr.snapshot_available = true;
+    }
+    else tb_text_buffer_dispose(&candidate);
+}
+
+bool studioHmrPostBoot(Studio* studio)
+{
+    if(!studio)
+        return false;
+
+    if(!hmr_is_lua_runtime(studio))
+    {
+        hmr_clear_snapshot(studio);
+        studio->hmr.delivery_pending = false;
+        studio->hmr.saver_available = false;
+        return true;
+    }
+
+#if defined(TIC_BUILD_WITH_LUA_API)
+    const bool has_saved = studio->hmr.delivery_pending && studio->hmr.snapshot_available;
+    const luaapi_hmr_result result = luaapi_hmr_restore(
+        studio->tic,
+        has_saved ? tb_text_buffer_data(&studio->hmr.snapshot) : NULL,
+        has_saved ? studio->hmr.snapshot.len : 0,
+        has_saved);
+
+    hmr_clear_snapshot(studio);
+    studio->hmr.delivery_pending = false;
+    studio->hmr.saver_available = result == LUAAPI_HMR_SAVER_INSTALLED;
+    return result != LUAAPI_HMR_ERROR;
+#else
+    return true;
+#endif
+}
+
+void studioHmrDiscardPending(Studio* studio)
+{
+    if(!studio)
+        return;
+
+    hmr_clear_snapshot(studio);
+    studio->hmr.delivery_pending = false;
+}
+
+void studioHmrDiscardAll(Studio* studio)
+{
+    studioHmrDiscardPending(studio);
+    if(studio)
+        studio->hmr.saver_available = false;
 }
 
 static bool remoting_has_current_cart(const Studio* studio)
@@ -444,6 +547,9 @@ static bool remoting_load(void* userdata, const char* cart_path, bool run, char*
         return false;
     }
 
+    if(run)
+        hmr_capture_snapshot(studio);
+
     if(!studio->console->loadCart(studio->console, cart_path))
     {
         if(err && errcap) { strncpy(err, "failed to load cart", errcap - 1); err[errcap - 1] = '\0'; }
@@ -451,7 +557,10 @@ static bool remoting_load(void* userdata, const char* cart_path, bool run, char*
     }
 
     if(run)
+    {
+        studio->hmr.delivery_pending = true;
         runGame(studio);
+    }
 
     return true;
 }
@@ -3360,6 +3469,8 @@ void studio_delete(Studio* studio)
 {
     {
 #if defined(TIC_BUILD_WITH_REMOTING)
+        hmr_clear_snapshot(studio);
+
         if(studio->remoting)
         {
             ticbuild_remoting_close(studio->remoting);

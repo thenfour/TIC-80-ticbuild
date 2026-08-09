@@ -178,6 +178,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
     - `perf` - returns current live performance metrics. see below for response
     - `metadata <key>` - returns the value for the metadata value in code.
       See: https://github.com/nesbox/TIC-80/wiki/Cartridge-Metadata.
+
     - `lua_profiler_start <mode> <instructionInterval> <wallClockPeriodMicros> <frameMode?> <seconds?> <output_path?>` - Starts a
       Lua performance profiling session. See below for performance profiler instructions.
     - `lua_profiler_stop <output_path>`. Stops the profiler and writes the output to the optional
@@ -189,6 +190,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       types with `1`; `0` will unsubscribe. Event types that aren't specified here are unaffected.
       Example: `0 event_subscribe "trace|cart_run" 1` enables
       receiving `trace()` and cart run events pushed from server to client (and other event types remain unaffected)
+
   - datatypes
     - numbers (integral, negative, decimal)
       - No fancy `1e3` forms
@@ -204,6 +206,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       - example: `<ff 22 00>`
       - string syntax: always hexadecimal.
       - whitespace is ignored so `<ff2200>` or `<f f220 0>` are equivalent to `<ff 22 00>`
+
 - response
   - datatypes follow same convention as requests
   - `<id> <status> <data...>`
@@ -229,6 +232,40 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       - (this is the only one supported so far)
 - Commands to be queued and executed at a deterministic safe point in the
   TIC-80 system loop (e.g., between frames if the cart is running)
+
+## Lua hot-reload continuity
+
+In-process remoting loads with `run=1` automatically opt into best-effort Lua
+state continuity. A cart participates by defining the global `HMR` entrypoint:
+
+```lua
+function HMR(saved)
+    if saved ~= nil then
+        -- Apply or migrate state after BOOT() and before the first TIC().
+        state = saved
+    end
+
+    -- This function is called between TIC() calls immediately before the next
+    -- cart load. Its single return value is the state retained for that load.
+    return function()
+        return state
+    end
+end
+```
+
+`HMR(saved)` is called once after `BOOT()` and before first `TIC()`.
+`saved` is `nil` when no previous saved value was placed (initial run, no
+saver installed on previous run, et al).
+Returning `nil` installs no saver callback.
+
+The state snapshot is consumed by the next successful load-and-run.
+Missing `HMR` discards it.
+
+Supported values are `nil`, booleans, finite, tables. Must contain no cycles,
+references, functions, threads, userdata.
+
+Note the existing bug: [tb_escape_string can produce invalid output](https://github.com/thenfour/TIC-80-ticbuild/issues/22),
+meaning the state snapshot may fail to serialize until that's fixed.
 
 # `perf` command
 

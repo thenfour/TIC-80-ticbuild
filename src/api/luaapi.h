@@ -39,3 +39,18 @@ void luaapi_bdr(tic_mem* tic, s32 row, void* data);
 void luaapi_menu(tic_mem* tic, s32 index, void* data);
 void luaapi_close(tic_mem* tic);
 void luaapi_open(lua_State *lua);
+
+typedef enum
+{
+    LUAAPI_HMR_NONE,
+    LUAAPI_HMR_SAVER_INSTALLED,
+    LUAAPI_HMR_ERROR,
+} luaapi_hmr_result;
+
+// Invokes the saver installed by the most recent HMR() call. On success, the
+// single non-nil value to serialize is left at the top of the Lua stack.
+bool luaapi_hmr_push_saved_value(tic_mem* tic);
+
+// Invokes global HMR(saved) after BOOT. The returned function, if any, becomes
+// the saver for this VM generation.
+luaapi_hmr_result luaapi_hmr_restore(tic_mem* tic, const char* saved, size_t savedSize, bool hasSaved);

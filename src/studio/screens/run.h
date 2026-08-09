@@ -36,6 +36,7 @@ struct Run
     tic_tick_data tickData;
 
     bool exit;
+    bool error;
 
     char saveid[TICNAME_MAX];
     tic_persistent pmem;

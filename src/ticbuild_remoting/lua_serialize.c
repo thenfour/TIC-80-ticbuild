@@ -1,5 +1,7 @@
 #include "lua_serialize.h"
 
+#include "api/luaapi.h"
+#include "core/core.h"
 #include "ticbuild_remoting/utils.h"
 
 #include <string.h>
@@ -306,5 +308,19 @@ bool tb_lua_serialize_expr(lua_State* lua, int index, tb_text_buffer* out, char*
 
     lua_pop(lua, 1);
 
+    return ok;
+}
+
+bool tb_lua_capture_hmr_state(tic_mem* tic, tb_text_buffer* out)
+{
+    tic_core* core = (tic_core*)tic;
+    lua_State* lua = core ? core->currentVM : NULL;
+
+    if(!lua || !out || !luaapi_hmr_push_saved_value(tic))
+        return false;
+
+    char err[128];
+    bool ok = tb_lua_serialize_expr(lua, -1, out, err, sizeof err);
+    lua_settop(lua, 0);
     return ok;
 }
