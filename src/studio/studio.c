@@ -22,6 +22,10 @@
 
 #include "studio.h"
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
+
 #if defined(BUILD_EDITORS)
 
 #if defined(_WIN32)
@@ -280,6 +284,8 @@ struct Studio
 
     tic_fs* fs;
     s32 samplerate;
+    tic_audio_capture* audioCapture;
+    bool audioCaptureErrorNotified;
     tic_font systemFont;
 
 };
@@ -3403,10 +3409,128 @@ void studio_tick(Studio* studio, tic80_input input)
 #endif
 }
 
+static const char AudioCaptureFilename[] = "audio-capture.wav";
+
+static void notifyAudioCaptureError(Studio* studio)
+{
+    if(studio->audioCaptureErrorNotified)
+        return;
+
+    const char* error = tic_audio_capture_error(studio->audioCapture);
+    if(!error)
+        return;
+
+    studio->audioCaptureErrorNotified = true;
+    fprintf(stderr, "audio capture: %s\n", error);
+
+#if defined(__EMSCRIPTEN__)
+    EM_ASM({
+        var message = UTF8ToString($0);
+        var handler = Module['onAudioCaptureError'];
+        if(typeof handler === 'function')
+            setTimeout(function() { handler({message: message}); }, 0);
+    }, error);
+#endif
+}
+
+static const char* onAudioCaptureComplete(void* data, const uint8_t* wav, size_t size)
+{
+    Studio* studio = data;
+    if(!tic_fs_saveroot(studio->fs, AudioCaptureFilename, wav, (s32)size, true))
+        return "failed to save audio-capture.wav";
+
+#if defined(__EMSCRIPTEN__)
+    EM_ASM({
+        var filename = UTF8ToString($0);
+        var bytes = HEAPU8.slice($1, $1 + $2);
+        var handler = Module['onAudioCaptureComplete'];
+        if(typeof handler === 'function')
+        {
+            var result = {filename: filename, mimeType: 'audio/wav', bytes: bytes};
+            setTimeout(function() { handler(result); }, 0);
+        }
+    }, AudioCaptureFilename, wav, size);
+#endif
+
+    return NULL;
+}
+
+bool studio_audio_capture_start(Studio* studio)
+{
+    if(!studio || !studio->audioCapture)
+        return false;
+
+    bool started = tic_audio_capture_start(studio->audioCapture, studio->samplerate, TIC80_SAMPLE_CHANNELS);
+    if(started)
+        studio->audioCaptureErrorNotified = false;
+    else
+        notifyAudioCaptureError(studio);
+
+    return started;
+}
+
+bool studio_audio_capture_end(Studio* studio)
+{
+    return studio && tic_audio_capture_end(studio->audioCapture);
+}
+
+tic_audio_capture_state studio_audio_capture_status(Studio* studio, const char** detail)
+{
+    if(detail)
+        *detail = NULL;
+
+    if(!studio || !studio->audioCapture)
+        return TIC_AUDIO_CAPTURE_UNSUPPORTED;
+
+    tic_audio_capture_state state = tic_audio_capture_status(studio->audioCapture);
+    if(detail)
+    {
+        if(state == TIC_AUDIO_CAPTURE_COMPLETE)
+            *detail = AudioCaptureFilename;
+        else if(state == TIC_AUDIO_CAPTURE_ERROR)
+            *detail = tic_audio_capture_error(studio->audioCapture);
+    }
+
+    return state;
+}
+
+// nb: abort is not the same as end; discards data and sets error.
+void studio_audio_capture_abort(Studio* studio)
+{
+    if(!studio || !studio->audioCapture)
+        return;
+
+    tic_audio_capture_state state = tic_audio_capture_status(studio->audioCapture);
+    if(state == TIC_AUDIO_CAPTURE_STOPPING)
+    {
+        if(!tic_audio_capture_finish(studio->audioCapture, onAudioCaptureComplete, studio))
+            notifyAudioCaptureError(studio);
+    }
+    else if(state == TIC_AUDIO_CAPTURE_CAPTURING)
+    {
+        tic_audio_capture_abort(studio->audioCapture, "audio capture was interrupted by reset or exit");
+        notifyAudioCaptureError(studio);
+    }
+}
+
 void studio_sound(Studio* studio)
 {
     tic_mem* tic = studio->tic;
     tic_core_synth_sound(tic);
+
+    tic_audio_capture_state captureState = tic_audio_capture_status(studio->audioCapture);
+    if(captureState == TIC_AUDIO_CAPTURE_CAPTURING || captureState == TIC_AUDIO_CAPTURE_STOPPING)
+    {
+        if(!tic_audio_capture_write(
+            studio->audioCapture,
+            tic->product.samples.buffer,
+            tic->product.samples.count,
+            onAudioCaptureComplete,
+            studio))
+        {
+            notifyAudioCaptureError(studio);
+        }
+    }
 
     s32 volume = getConfig(studio)->options.volume;
 
@@ -3467,6 +3591,9 @@ void exitGame(Studio* studio)
 
 void studio_delete(Studio* studio)
 {
+    studio_audio_capture_abort(studio);
+    tic_audio_capture_delete(studio->audioCapture);
+
     {
 #if defined(TIC_BUILD_WITH_REMOTING)
         hmr_clear_snapshot(studio);
@@ -3693,6 +3820,8 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
     {
         .mode = TIC_START_MODE,
         .prevMode = TIC_CODE_MODE,
+        .samplerate = samplerate,
+        .audioCapture = tic_audio_capture_create(),
 
 #if defined(BUILD_EDITORS)
         .menuMode = TIC_CONSOLE_MODE,
@@ -3721,7 +3850,6 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
             .text = "\0",
         },
 
-        .samplerate = samplerate,
         .net = tic_net_create(TIC_WEBSITE),
 
 #if defined(TIC_BUILD_WITH_REMOTING)

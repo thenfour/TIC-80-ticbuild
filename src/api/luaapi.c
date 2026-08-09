@@ -1687,6 +1687,69 @@ static int lua_perf_clear(lua_State* lua)
     return 0;
 }
 
+// request to start audio capture
+static int lua_audio_capture_start(lua_State* lua)
+{
+    if(lua_gettop(lua) != 0)
+        luaL_error(lua, "invalid parameters, audio_capture_start()\n");
+
+    tic_core* core = getLuaCore(lua);
+    tic_tick_data* data = core->data;
+    bool started = data && data->audioCaptureStart && data->audioCaptureStart(data->data);
+
+    lua_pushboolean(lua, started);
+    return 1;
+}
+
+// request to end audio capture
+static int lua_audio_capture_end(lua_State* lua)
+{
+    if(lua_gettop(lua) != 0)
+        luaL_error(lua, "invalid parameters, audio_capture_end()\n");
+
+    tic_core* core = getLuaCore(lua);
+    tic_tick_data* data = core->data;
+    bool ended = data && data->audioCaptureEnd && data->audioCaptureEnd(data->data);
+
+    lua_pushboolean(lua, ended);
+    return 1;
+}
+
+static const char* audioCaptureStateName(tic_audio_capture_state state)
+{
+    switch(state)
+    {
+    case TIC_AUDIO_CAPTURE_IDLE: return "idle";
+    case TIC_AUDIO_CAPTURE_CAPTURING: return "capturing";
+    case TIC_AUDIO_CAPTURE_STOPPING: return "stopping";
+    case TIC_AUDIO_CAPTURE_COMPLETE: return "complete";
+    case TIC_AUDIO_CAPTURE_ERROR: return "error";
+    case TIC_AUDIO_CAPTURE_UNSUPPORTED:
+    default: return "unsupported";
+    }
+}
+
+static int lua_audio_capture_status(lua_State* lua)
+{
+    if(lua_gettop(lua) != 0)
+        luaL_error(lua, "invalid parameters, audio_capture_status()\n");
+
+    tic_core* core = getLuaCore(lua);
+    tic_tick_data* data = core->data;
+    const char* detail = NULL;
+    tic_audio_capture_state state = data && data->audioCaptureStatus
+        ? data->audioCaptureStatus(data->data, &detail)
+        : TIC_AUDIO_CAPTURE_UNSUPPORTED;
+
+    lua_pushstring(lua, audioCaptureStateName(state));
+    if(detail)
+        lua_pushstring(lua, detail);
+    else
+        lua_pushnil(lua);
+
+    return 2;
+}
+
 void luaapi_open(lua_State *lua)
 {
     static const luaL_Reg loadedlibs[] =
@@ -1728,6 +1791,9 @@ void luaapi_init(tic_core* core)
     registerLuaFunction(core, lua_loadfile, "loadfile");
     registerLuaFunction(core, lua_perf_tick, "perf_tick");
     registerLuaFunction(core, lua_perf_clear, "perf_clear");
+    registerLuaFunction(core, lua_audio_capture_start, "audio_capture_start");
+    registerLuaFunction(core, lua_audio_capture_end, "audio_capture_end");
+    registerLuaFunction(core, lua_audio_capture_status, "audio_capture_status");
 }
 
 void luaapi_close(tic_mem* tic)

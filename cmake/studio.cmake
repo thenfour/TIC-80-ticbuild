@@ -4,6 +4,7 @@
 
 set(TIC80LIB_DIR ${CMAKE_SOURCE_DIR}/src)
 set(TIC80STUDIO_SRC
+    ${TIC80LIB_DIR}/audio_capture.c
     ${TIC80LIB_DIR}/studio/screens/run.c
     ${TIC80LIB_DIR}/studio/screens/menu.c
     ${TIC80LIB_DIR}/studio/screens/mainmenu.c

@@ -335,6 +335,10 @@ void tic_api_reset(tic_mem* memory)
 {
     tic_core* core = (tic_core*)memory;
 
+    // abort audio capture / clear audio capture state
+    if(core->data && core->data->audioCaptureAbort)
+        core->data->audioCaptureAbort(core->data->data);
+
     // keyboard state is critical and must be preserved across API resets.
     // Often `tic_api_reset` is called to effect transitions between modes
     // yet we still need to know when the key WAS pressed after the

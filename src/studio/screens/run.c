@@ -81,6 +81,30 @@ static void onExit(void* data)
     run->exit = true;
 }
 
+static bool onAudioCaptureStart(void* data)
+{
+    Run* run = data;
+    return studio_audio_capture_start(run->studio);
+}
+
+static bool onAudioCaptureEnd(void* data)
+{
+    Run* run = data;
+    return studio_audio_capture_end(run->studio);
+}
+
+static tic_audio_capture_state onAudioCaptureStatus(void* data, const char** detail)
+{
+    Run* run = data;
+    return studio_audio_capture_status(run->studio, detail);
+}
+
+static void onAudioCaptureAbort(void* data)
+{
+    Run* run = data;
+    studio_audio_capture_abort(run->studio);
+}
+
 static const char* data2md5(const void* data, s32 length)
 {
     const char *str = data;
@@ -193,6 +217,10 @@ void initRun(Run* run, Console* console, tic_fs* fs, Studio* studio)
             .data = run,
             .counter = getCounter,
             .freq = getFreq,
+            .audioCaptureStart = onAudioCaptureStart,
+            .audioCaptureEnd = onAudioCaptureEnd,
+            .audioCaptureStatus = onAudioCaptureStatus,
+            .audioCaptureAbort = onAudioCaptureAbort,
 #if defined(TIC_BUILD_WITH_REMOTING)
             .postBoot = onPostBoot,
 #endif

@@ -23,6 +23,7 @@
 #pragma once
 
 #include "retro_endianness.h"
+#include "audio_capture.h"
 #include "tic.h"
 #include "time.h"
 
@@ -37,6 +38,10 @@ typedef void(*ExitCallback)(void*);
 typedef u64(*CounterCallback)(void*);
 typedef u64(*FreqCallback)(void*);
 typedef bool(*PostBootCallback)(void*, tic_mem*); // for HMR support
+typedef bool(*AudioCaptureStartCallback)(void*);
+typedef bool(*AudioCaptureEndCallback)(void*);
+typedef tic_audio_capture_state(*AudioCaptureStatusCallback)(void*, const char** detail);
+typedef void(*AudioCaptureAbortCallback)(void*);
 
 typedef struct
 {
@@ -50,6 +55,10 @@ typedef struct
 
     void* data;
     PostBootCallback postBoot;
+    AudioCaptureStartCallback audioCaptureStart;
+    AudioCaptureEndCallback audioCaptureEnd;
+    AudioCaptureStatusCallback audioCaptureStatus;
+    AudioCaptureAbortCallback audioCaptureAbort;
 } tic_tick_data;
 
 typedef void(*tic_tick)(tic_mem* memory);
