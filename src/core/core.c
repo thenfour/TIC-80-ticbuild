@@ -235,10 +235,23 @@ void tic_api_sync(tic_mem* tic, u32 mask, s32 bank, bool toCart)
     core->state.synced |= mask;
 }
 
+// for time() virtualization due to warp mode
+static u64 timeCounter(const tic_tick_data* data)
+{
+    CounterCallback counter = data->timeCounter ? data->timeCounter : data->counter;
+    return counter(data->data);
+}
+
+static u64 timeFreq(const tic_tick_data* data)
+{
+    FreqCallback freq = data->timeFreq ? data->timeFreq : data->freq;
+    return freq(data->data);
+}
+
 double tic_api_time(tic_mem* memory)
 {
     tic_core* core = (tic_core*)memory;
-    return (double)(core->data->counter(core->data->data) - core->data->start) * 1000.0 / core->data->freq(core->data->data);
+    return (double)(timeCounter(core->data) - core->data->start) * 1000.0 / timeFreq(core->data);
 }
 
 s32 tic_api_tstamp(tic_mem* memory)
@@ -338,6 +351,9 @@ void tic_api_reset(tic_mem* memory)
     // abort audio capture / clear audio capture state
     if(core->data && core->data->audioCaptureAbort)
         core->data->audioCaptureAbort(core->data->data);
+
+    if(core->data && core->data->warpModeSet)
+        core->data->warpModeSet(core->data->data, false);
 
     // keyboard state is critical and must be preserved across API resets.
     // Often `tic_api_reset` is called to effect transitions between modes
@@ -471,7 +487,7 @@ void tic_core_tick(tic_mem* tic, tic_tick_data* data)
                 tic->input.keyboard = 1;
             else tic->input.data = -1;  // default is all enabled
 
-            data->start = data->counter(core->data->data);
+            data->start = timeCounter(data);
 
             if (config->useBinarySection)
                 code = tic->cart.binary.data;
@@ -511,7 +527,7 @@ void tic_core_pause(tic_mem* memory)
     if (core->data)
     {
         core->pause.time.start = core->data->start;
-        core->pause.time.paused = core->data->counter(core->data->data);
+        core->pause.time.paused = timeCounter(core->data);
     }
 }
 
@@ -523,7 +539,7 @@ void tic_core_resume(tic_mem* memory)
     {
         memcpy(&core->state, &core->pause.state, sizeof(tic_core_state_data));
         memcpy(memory->ram, &core->pause.ram, sizeof(tic_ram));
-        core->data->start = core->pause.time.start + core->data->counter(core->data->data) - core->pause.time.paused;
+        core->data->start = core->pause.time.start + timeCounter(core->data) - core->pause.time.paused;
         memory->input.data = core->pause.input;
     }
     else

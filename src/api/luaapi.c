@@ -1750,6 +1750,28 @@ static int lua_audio_capture_status(lua_State* lua)
     return 2;
 }
 
+static int lua_warp_mode(lua_State* lua)
+{
+    int args = lua_gettop(lua);
+    if(args > 1 || (args == 1 && !lua_isboolean(lua, 1)))
+        luaL_error(lua, "invalid parameters, warp_mode([enabled])\n");
+
+    tic_core* core = getLuaCore(lua);
+    tic_tick_data* data = core->data;
+
+    if(args == 1 && data && data->warpModeSet)
+        data->warpModeSet(data->data, lua_toboolean(lua, 1));
+
+    bool supported = false;
+    bool enabled = data && data->warpModeStatus
+        ? data->warpModeStatus(data->data, &supported)
+        : false;
+
+    lua_pushboolean(lua, enabled);
+    lua_pushboolean(lua, supported);
+    return 2;
+}
+
 void luaapi_open(lua_State *lua)
 {
     static const luaL_Reg loadedlibs[] =
@@ -1794,6 +1816,7 @@ void luaapi_init(tic_core* core)
     registerLuaFunction(core, lua_audio_capture_start, "audio_capture_start");
     registerLuaFunction(core, lua_audio_capture_end, "audio_capture_end");
     registerLuaFunction(core, lua_audio_capture_status, "audio_capture_status");
+    registerLuaFunction(core, lua_warp_mode, "warp_mode");
 }
 
 void luaapi_close(tic_mem* tic)

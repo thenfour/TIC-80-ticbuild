@@ -32,6 +32,26 @@ Module.onAudioCaptureError = ({ message }) => {};
 Press <kbd>ALT+R</kbd> to toggle audio capture from the standalone studio. While
 the capture state is not `idle`, the current state is shown in the window title.
 
+## Warp-speed Lua API
+
+Warp mode runs multiple TIC()s during each host frame:
+
+```lua
+local enabled, supported = warp_mode()       -- query
+local enabled, supported = warp_mode(true)   -- enable
+local enabled, supported = warp_mode(false)  -- disable
+```
+
+Warp mode is available only while a cartridge is running. It advances `time()`
+by exactly `1000/60` milliseconds per warped frame, synthesizes one audio block
+per frame, and automatically disables on interruptions (e.g., reset, exit,
+error, leaving Run mode).
+
+Audio capture continues to operate during warp mode, enabling "offline rendering"
+of songs.
+
+Press <kbd>ALT+W</kbd> to toggle warp mode. Window title indicates when enabled.
+
 # original readme:
 
 [![Build Status](https://github.com/nesbox/TIC-80/workflows/Build/badge.svg)](https://github.com/nesbox/TIC-80/actions?query=workflow%3ABuild)

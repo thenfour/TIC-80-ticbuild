@@ -44,8 +44,10 @@ static void onTrace(void* data, const char* text, u8 color)
 
 static void onError(void* data, const char* info)
 {
-#if defined(BUILD_EDITORS)
     Run* run = (Run*)data;
+    studio_warp_mode_set(run->studio, false);
+
+#if defined(BUILD_EDITORS)
     run->error = true;
 #if defined(TIC_BUILD_WITH_REMOTING)
     if(((tic_core*)run->tic)->state.initialized)
@@ -55,6 +57,9 @@ static void onError(void* data, const char* info)
 #endif
     setStudioMode(run->studio, TIC_CONSOLE_MODE);
     run->console->error(run->console, info);
+#else
+    run->error = true;
+    (void)info;
 #endif
 }
 
@@ -103,6 +108,18 @@ static void onAudioCaptureAbort(void* data)
 {
     Run* run = data;
     studio_audio_capture_abort(run->studio);
+}
+
+static bool onWarpModeSet(void* data, bool enabled)
+{
+    Run* run = data;
+    return studio_warp_mode_set(run->studio, enabled);
+}
+
+static bool onWarpModeStatus(void* data, bool* supported)
+{
+    Run* run = data;
+    return studio_warp_mode_status(run->studio, supported);
 }
 
 static const char* data2md5(const void* data, s32 length)
@@ -198,6 +215,18 @@ static u64 getCounter(void* data)
     return tic_sys_counter_get();
 }
 
+static u64 getTimeFreq(void* data)
+{
+    Run* run = data;
+    return studio_warp_time_freq(run->studio);
+}
+
+static u64 getTimeCounter(void* data)
+{
+    Run* run = data;
+    return studio_warp_time_counter(run->studio);
+}
+
 void initRun(Run* run, Console* console, tic_fs* fs, Studio* studio)
 {
     *run = (Run)
@@ -221,6 +250,10 @@ void initRun(Run* run, Console* console, tic_fs* fs, Studio* studio)
             .audioCaptureEnd = onAudioCaptureEnd,
             .audioCaptureStatus = onAudioCaptureStatus,
             .audioCaptureAbort = onAudioCaptureAbort,
+            .warpModeSet = onWarpModeSet,
+            .warpModeStatus = onWarpModeStatus,
+            .timeCounter = getTimeCounter,
+            .timeFreq = getTimeFreq,
 #if defined(TIC_BUILD_WITH_REMOTING)
             .postBoot = onPostBoot,
 #endif

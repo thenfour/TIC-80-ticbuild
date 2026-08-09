@@ -284,6 +284,11 @@ struct Studio
     s32 samplerate;
     tic_audio_capture* audioCapture;
     bool audioCaptureErrorNotified;
+    bool warpSupported;
+    bool warpRequested;
+    bool warpActive;
+    u64 warpTimeBase;
+    u64 warpTimeHostAnchor;
     uint64_t title_last_counter;
     bool title_pending;
     tic_font systemFont;
@@ -1859,6 +1864,8 @@ static void exitConfirm(Studio* studio, bool yes, void* data)
 
 void studio_exit(Studio* studio)
 {
+    studio_warp_mode_set(studio, false);
+
 #if defined(BUILD_EDITORS)
     if(studio->mode != TIC_START_MODE && studioCartChanged(studio))
     {
@@ -2216,6 +2223,8 @@ static void updateTitle(Studio* studio)
         // show title bar status when not idle.
         case TIC_AUDIO_CAPTURE_IDLE:
         case TIC_AUDIO_CAPTURE_COMPLETE:
+            break;
+        default:
         {
             char full[TICNAME_MAX];
             snprintf(full, TICNAME_MAX, "%s | AUDIO CAP: %s", name, tic_audio_capture_state_name(captureState));
@@ -2223,6 +2232,14 @@ static void updateTitle(Studio* studio)
             name[TICNAME_MAX - 1] = '\0';
         }
         break;
+    }
+
+    if(studio_warp_mode_status(studio, NULL))
+    {
+        char full[TICNAME_MAX];
+        snprintf(full, TICNAME_MAX, "%s | WARP", name);
+        strncpy(name, full, TICNAME_MAX - 1);
+        name[TICNAME_MAX - 1] = '\0';
     }
 
 #if defined(BUILD_EDITORS)
@@ -2524,6 +2541,14 @@ static void toggleAudioCapture(Studio* studio)
     }
 }
 
+static void toggleWarpMode(Studio* studio)
+{
+    bool supported = false;
+    bool enabled = studio_warp_mode_status(studio, &supported);
+    if(supported)
+        studio_warp_mode_set(studio, !enabled);
+}
+
 static void gotoFullscreen(Studio* studio)
 {
     tic_sys_fullscreen_set(studio->config->data.options.fullscreen = !tic_sys_fullscreen_get());
@@ -2636,6 +2661,8 @@ static void processShortcuts(Studio* studio)
     {
         if(keyWasPressedOnce(studio, tic_key_r))
             toggleAudioCapture(studio);
+        else if(keyWasPressedOnce(studio, tic_key_w))
+            toggleWarpMode(studio);
 #if defined(BUILD_EDITORS)
         else if(keyWasPressedOnce(studio, tic_key_0))
         {
@@ -3445,9 +3472,122 @@ void studio_tick(Studio* studio, tic80_input input)
 
 static const char AudioCaptureFilename[] = "audio-capture.wav";
 
-static void markAudioCaptureTitleDirty(Studio* studio)
+static void markTitleDirty(Studio* studio)
 {
     studio->title_pending = true;
+}
+
+enum
+{
+    // fixed precision scaling factor, allowing sub-frame precise timing.
+    WarpTimeTicksPerFrame = 1000000,
+    WarpTimeFrequency = TIC80_FRAMERATE * WarpTimeTicksPerFrame,
+};
+
+u64 studio_warp_time_freq(Studio* studio)
+{
+    (void)studio;
+    return WarpTimeFrequency;
+}
+
+u64 studio_warp_time_counter(Studio* studio)
+{
+    if(!studio)
+        return 0;
+
+    if(studio->warpActive)
+        return studio->warpTimeBase;
+
+    u64 now = tic_sys_counter_get();
+    u64 hostFreq = tic_sys_freq_get();
+    if(!hostFreq || now < studio->warpTimeHostAnchor)
+        return studio->warpTimeBase;
+
+    u64 elapsed = now - studio->warpTimeHostAnchor;
+    u64 logicalElapsed = (u64)((long double)elapsed * WarpTimeFrequency / hostFreq);
+    return studio->warpTimeBase + logicalElapsed;
+}
+
+void studio_warp_set_supported(Studio* studio, bool supported)
+{
+    if(!studio)
+        return;
+
+    if(!supported)
+    {
+        studio->warpTimeBase = studio_warp_time_counter(studio);
+        studio->warpTimeHostAnchor = tic_sys_counter_get();
+        studio->warpRequested = false;
+        studio->warpActive = false;
+    }
+
+    studio->warpSupported = supported;
+}
+
+bool studio_warp_mode_set(Studio* studio, bool enabled)
+{
+    if(!studio)
+        return false;
+
+    if(enabled && (!studio->warpSupported || studio->mode != TIC_RUN_MODE))
+        return false;
+
+    if(enabled && !studio->warpRequested && !studio->warpActive)
+    {
+        studio->warpTimeBase = studio_warp_time_counter(studio);
+        studio->warpTimeHostAnchor = tic_sys_counter_get();
+    }
+
+    if(studio->warpRequested != enabled)
+        markTitleDirty(studio);
+
+    studio->warpRequested = enabled;
+    return true;
+}
+
+bool studio_warp_mode_status(Studio* studio, bool* supported)
+{
+    if(supported)
+        *supported = studio && studio->warpSupported;
+
+    return studio && studio->warpRequested;
+}
+
+bool studio_warp_active(Studio* studio)
+{
+    return studio && studio->warpActive;
+}
+
+bool studio_warp_tick_complete(Studio* studio, bool warpedTick)
+{
+    if(!studio)
+        return false;
+
+    bool wasActive = studio->warpActive;
+    bool completedWarpedTick = warpedTick
+        && studio->mode == TIC_RUN_MODE
+        && !studio->alive
+        && !studio->run->error;
+
+    if(completedWarpedTick)
+        studio->warpTimeBase += WarpTimeTicksPerFrame;
+
+    if(studio->warpRequested
+        && (studio->mode != TIC_RUN_MODE || studio->alive || studio->run->error))
+    {
+        studio_warp_mode_set(studio, false);
+    }
+
+    studio->warpActive = studio->warpSupported
+        && studio->warpRequested
+        && studio->mode == TIC_RUN_MODE
+        && !studio->alive
+        && !studio->run->error;
+
+    if(wasActive && !studio->warpActive)
+        studio->warpTimeHostAnchor = tic_sys_counter_get();
+
+    return completedWarpedTick;
 }
 
 static void notifyAudioCaptureError(Studio* studio)
@@ -3460,7 +3600,7 @@ static void notifyAudioCaptureError(Studio* studio)
         return;
 
     studio->audioCaptureErrorNotified = true;
-    markAudioCaptureTitleDirty(studio);
+    markTitleDirty(studio);
     fprintf(stderr, "audio capture: %s\n", error);
 
 #if defined(__EMSCRIPTEN__)
@@ -3476,7 +3616,7 @@ static void notifyAudioCaptureError(Studio* studio)
 static const char* onAudioCaptureComplete(void* data, const uint8_t* wav, size_t size)
 {
     Studio* studio = data;
-    markAudioCaptureTitleDirty(studio);
+    markTitleDirty(studio);
     if(!tic_fs_saveroot(studio->fs, AudioCaptureFilename, wav, (s32)size, true))
         return "failed to save audio-capture.wav";
 
@@ -3507,7 +3647,7 @@ bool studio_audio_capture_start(Studio* studio)
     else
         notifyAudioCaptureError(studio);
 
-    markAudioCaptureTitleDirty(studio);
+    markTitleDirty(studio);
     return started;
 }
 
@@ -3515,7 +3655,7 @@ bool studio_audio_capture_end(Studio* studio)
 {
     bool ended = studio && tic_audio_capture_end(studio->audioCapture);
     if(studio)
-        markAudioCaptureTitleDirty(studio);
+        markTitleDirty(studio);
     return ended;
 }
 
@@ -3867,6 +4007,11 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .prevMode = TIC_CODE_MODE,
         .samplerate = samplerate,
         .audioCapture = tic_audio_capture_create(),
+        .warpSupported = false,
+        .warpRequested = false,
+        .warpActive = false,
+        .warpTimeBase = 0,
+        .warpTimeHostAnchor = tic_sys_counter_get(),
         .title_last_counter = 0,
         .title_pending = false,
 

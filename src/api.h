@@ -42,6 +42,8 @@ typedef bool(*AudioCaptureStartCallback)(void*);
 typedef bool(*AudioCaptureEndCallback)(void*);
 typedef tic_audio_capture_state(*AudioCaptureStatusCallback)(void*, const char** detail);
 typedef void(*AudioCaptureAbortCallback)(void*);
+typedef bool(*WarpModeSetCallback)(void*, bool enabled);
+typedef bool(*WarpModeStatusCallback)(void*, bool* supported);
 
 typedef struct
 {
@@ -59,6 +61,10 @@ typedef struct
     AudioCaptureEndCallback audioCaptureEnd;
     AudioCaptureStatusCallback audioCaptureStatus;
     AudioCaptureAbortCallback audioCaptureAbort;
+    WarpModeSetCallback warpModeSet;
+    WarpModeStatusCallback warpModeStatus;
+    CounterCallback timeCounter;
+    FreqCallback timeFreq;
 } tic_tick_data;
 
 typedef void(*tic_tick)(tic_mem* memory);

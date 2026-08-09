@@ -72,6 +72,22 @@ extern void gotoMenu(Studio* studio);
 
 #define TIC_PACKAGE "com.nesbox.tic"
 
+#ifndef TIC80_WARP_MAX_TICKS_PER_SLICE
+#define TIC80_WARP_MAX_TICKS_PER_SLICE 256
+#endif
+
+#ifndef TIC80_WARP_MAX_SLICE_MS
+#define TIC80_WARP_MAX_SLICE_MS 8
+#endif
+
+#if TIC80_WARP_MAX_TICKS_PER_SLICE < 1
+#error TIC80_WARP_MAX_TICKS_PER_SLICE must be at least 1
+#endif
+
+#if TIC80_WARP_MAX_SLICE_MS < 1
+#error TIC80_WARP_MAX_SLICE_MS must be at least 1
+#endif
+
 #define KBD_COLS 22
 #define KBD_ROWS 17
 
@@ -296,17 +312,26 @@ static void audioCallback(void* userdata, u8* stream, s32 len)
 {
     LOCK_MUTEX(platform.audio.mutex)
     {
-        const tic_mem* tic = studio_mem(platform.studio);
-
-        while(len--)
+        if(studio_warp_active(platform.studio))
         {
-            if (platform.audio.bufferRemaining <= 0)
-            {
-                studio_sound(platform.studio);
-                platform.audio.bufferRemaining = tic->product.samples.count * TIC80_SAMPLESIZE;
-            }
+            // during warp mode, don't play sound through SDL. silence buffer.
+            memset(stream, 0, len);
+            platform.audio.bufferRemaining = 0;
+        }
+        else
+        {
+            const tic_mem* tic = studio_mem(platform.studio);
 
-            *stream++ = ((u8*)tic->product.samples.buffer)[tic->product.samples.count * TIC80_SAMPLESIZE - platform.audio.bufferRemaining--];
+            while(len--)
+            {
+                if (platform.audio.bufferRemaining <= 0)
+                {
+                    studio_sound(platform.studio);
+                    platform.audio.bufferRemaining = tic->product.samples.count * TIC80_SAMPLESIZE;
+                }
+
+                *stream++ = ((u8*)tic->product.samples.buffer)[tic->product.samples.count * TIC80_SAMPLESIZE - platform.audio.bufferRemaining--];
+            }
         }
     }
 }
@@ -1769,7 +1794,40 @@ static void gpuTick()
 
     LOCK_MUTEX(platform.audio.mutex)
     {
-        studio_tick(platform.studio, platform.input);
+        u64 sliceStarted = SDL_GetPerformanceCounter();
+        u64 sliceFrequency = SDL_GetPerformanceFrequency();
+        s32 ticks = 0;
+
+        do
+        {
+            // in warp mode, run as many ticks as possible until we reach the time budget or max ticks per slice
+            bool wasWarping = studio_warp_active(platform.studio);
+            studio_tick(platform.studio, platform.input);
+
+            bool warpRequested = studio_warp_mode_status(platform.studio, NULL);
+            bool warpedTick = studio_warp_tick_complete(platform.studio, wasWarping || warpRequested);
+            if(warpedTick)
+            {
+                studio_sound(platform.studio);
+                platform.audio.bufferRemaining = studio_warp_active(platform.studio)
+                    ? 0
+                    : studio_mem(platform.studio)->product.samples.count * TIC80_SAMPLESIZE;
+            }
+
+            ticks++;
+
+            if(!studio_warp_active(platform.studio) || studio_alive(platform.studio))
+                break;
+
+            if(ticks >= TIC80_WARP_MAX_TICKS_PER_SLICE)
+                break;
+
+            u64 elapsed = SDL_GetPerformanceCounter() - sliceStarted;
+            u64 budget = sliceFrequency * TIC80_WARP_MAX_SLICE_MS / 1000;
+            if(elapsed >= MAX(1, budget))
+                break;
+        }
+        while(true);
     }
 
     renderClear(platform.screen.renderer);
@@ -1944,6 +2002,7 @@ static s32 start(s32 argc, char **argv, const char* folder)
     }
 
     platform.studio = studio_create(argc, argv, TIC80_SAMPLERATE, SCREEN_FORMAT, folder, determineMaximumScale(), detect_keyboard_layout());
+    studio_warp_set_supported(platform.studio, true);
 
     SCOPE(studio_delete(platform.studio))
     {
