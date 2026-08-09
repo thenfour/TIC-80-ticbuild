@@ -3627,7 +3627,10 @@ static const char* onAudioCaptureComplete(void* data, const uint8_t* wav, size_t
         var handler = Module['onAudioCaptureComplete'];
         if(typeof handler === 'function')
         {
-            var result = {filename: filename, mimeType: 'audio/wav', bytes: bytes};
+            var result = {};
+            result.filename = filename;
+            result.mimeType = 'audio/wav';
+            result.bytes = bytes;
             setTimeout(function() { handler(result); }, 0);
         }
     }, AudioCaptureFilename, wav, size);
