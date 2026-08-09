@@ -42,6 +42,29 @@ to:
 PK_THREAD_LOCAL VM* pk_current_vm;
 ```
 
+# Web build (intended for Somatic)
+
+[Somatic music tracker](https://somatic.tenfourmusic.net/) uses an embedded wasm build of
+tic-80 for playback. For some integration features, it can use this tic80 fork.
+Planned features: warp speed, audio i/o to web host.
+
+```powershell
+# CD to this repo root, e.g.,
+Set-Location C:\root\git\thenfour\TIC-80-ticbuild
+
+# establish emscripten env, e.g.,
+. C:\root\git\emsdk\emsdk_env.ps1
+
+# verify...
+Get-Command emcmake, emcc, cmake, ninja
+
+# build
+.\tools\build-web.ps1
+
+# artifacts placed in
+# .\out\emscripten\bin
+```
+
 # Perf HUD color scheme and thresholds
 
 HUD colors are configured with these optional command line args:

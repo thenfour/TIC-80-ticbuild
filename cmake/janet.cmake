@@ -30,7 +30,20 @@ endif()
 
 if(BUILD_WITH_JANET)
 
-    if(MINGW)
+    if(EMSCRIPTEN AND CMAKE_HOST_WIN32)
+        # CMake's WIN32/MINGW variables describe the Emscripten target, not the
+        # Windows host. Janet must first build and run a native bootstrap tool
+        # to generate janet.c. Its Makefile also uses POSIX utilities, so use a
+        # POSIX make environment but select the MINGW branch to link that host
+        # tool with the required Windows system libraries.
+        find_program(JANET_POSIX_MAKE_EXECUTABLE NAMES make REQUIRED)
+
+        add_custom_command(
+            OUTPUT ${THIRDPARTY_DIR}/janet/build/c/janet.c
+            COMMAND ${JANET_POSIX_MAKE_EXECUTABLE} UNAME=MINGW build/c/janet.c
+            WORKING_DIRECTORY ${THIRDPARTY_DIR}/janet/
+        )
+    elseif(MINGW)
         find_program(GIT git)
         get_filename_component(GIT_DIR ${GIT} DIRECTORY)
         find_program(GITBASH bash PATHS "${GIT_DIR}/../bin" NO_DEFAULT_PATH)

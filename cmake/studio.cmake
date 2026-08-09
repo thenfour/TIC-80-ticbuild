@@ -33,13 +33,20 @@ if(BUILD_EDITORS)
         ${TIC80LIB_DIR}/ticbuild_remoting/title_stats.c
         ${TIC80LIB_DIR}/ticbuild_remoting/utils.c
         ${TIC80LIB_DIR}/ticbuild_remoting/perf_hud.c
-        ${TIC80LIB_DIR}/ticbuild_remoting/remoting.c
-        ${TIC80LIB_DIR}/ticbuild_remoting/discovery.c
-        ${TIC80LIB_DIR}/ticbuild_remoting/lua_eval.c
-        ${TIC80LIB_DIR}/ticbuild_remoting/lua_serialize.c
         ${TIC80LIB_DIR}/ext/history.c
         ${TIC80LIB_DIR}/ext/gif.c
     )
+
+    # ticbuild remoting depends on desktop networking and filesystem behavior.
+    if(NOT EMSCRIPTEN)
+        set(TIC80STUDIO_SRC ${TIC80STUDIO_SRC}
+            ${TIC80LIB_DIR}/ticbuild_remoting/remoting.c
+            ${TIC80LIB_DIR}/ticbuild_remoting/discovery.c
+            ${TIC80LIB_DIR}/ticbuild_remoting/lua_eval.c
+            ${TIC80LIB_DIR}/ticbuild_remoting/lua_serialize.c
+        )
+        set(TIC_BUILD_WITH_REMOTING ON)
+    endif()
 endif()
 
 if(BUILD_PRO)
@@ -79,4 +86,8 @@ endif()
 
 if(BUILD_EDITORS)
     target_compile_definitions(tic80studio PUBLIC BUILD_EDITORS)
+endif()
+
+if(TIC_BUILD_WITH_REMOTING)
+    target_compile_definitions(tic80studio PUBLIC TIC_BUILD_WITH_REMOTING)
 endif()

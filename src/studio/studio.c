@@ -41,9 +41,11 @@
 #include "screens/surf.h"
 #include "ext/history.h"
 #include "net.h"
+#if defined(TIC_BUILD_WITH_REMOTING)
 #include "ticbuild_remoting/remoting.h"
-#include "ticbuild_remoting/title_stats.h"
 #include "ticbuild_remoting/utils.h"
+#endif
+#include "ticbuild_remoting/title_stats.h"
 #include "ticbuild_remoting/fps.h"
 #include "ticbuild_remoting/perf_hud.h"
 #include "ticbuild_remoting/user_timing.h"
@@ -67,7 +69,9 @@
 #include "screens/mainmenu.h"
 
 #include "api.h"
+#if defined(TIC_BUILD_WITH_REMOTING)
 #include "ticbuild_remoting/lua_eval.h"
+#endif
 
 #include "fs.h"
 
@@ -233,21 +237,23 @@ struct Studio
 
     tic_net* net;
 
-    TicbuildRemoting* remoting;
-    s32 remotingPort;
-
     tb_perf_hud_state perfHud;
     tb_perf_hud_mode perfHudMode;
     tb_perf_metrics perfFrame;
     tb_title_stats titleStats;
     uint64_t title_last_counter;
     bool title_pending;
+
+#if defined(TIC_BUILD_WITH_REMOTING)
+    TicbuildRemoting* remoting;
+    s32 remotingPort;
     uint64_t remoting_process_started_at;
     uint64_t remoting_cart_loaded_at;
     uint64_t remoting_cart_last_launch_at;
     CartHash remoting_cart_hash;
     bool remoting_cart_hash_valid;
     char remoting_cart_path[TICNAME_MAX];
+#endif
 
     Bytebattle bytebattle;
 
@@ -268,7 +274,7 @@ struct Studio
 
 static void emptyDone(void* data) {}
 
-#if defined(BUILD_EDITORS)
+#if defined(TIC_BUILD_WITH_REMOTING)
 
 // Remoting callbacks; put here so they can access studio things.
 const char* tic_tool_metatag(const char* code, const char* tag, const char* comment);
@@ -809,6 +815,11 @@ static bool remoting_lua_profiler_status(void* userdata, tb_text_buffer* out, ch
 
     return true;
 }
+#else
+void studioRemotingCartLoaded(Studio* studio) { (void)studio; }
+void studioRemotingTrace(Studio* studio, const char* text) { (void)studio; (void)text; }
+void studioRemotingCartRun(Studio* studio) { (void)studio; }
+void studioRemotingLuaProfilerStopped(Studio* studio) { (void)studio; }
 #endif
 
 void fadePalette(tic_palette* pal, s32 value)
@@ -2095,6 +2106,7 @@ static void updateTitle(Studio* studio)
         }
     }
 
+#if defined(TIC_BUILD_WITH_REMOTING)
     if(studio->remoting)
     {
         char extra[256];
@@ -2107,6 +2119,7 @@ static void updateTitle(Studio* studio)
             name[TICNAME_MAX - 1] = '\0';
         }
     }
+#endif // defined(TIC_BUILD_WITH_REMOTING)
 #endif
 
     tic_sys_title(name);
@@ -2134,7 +2147,9 @@ void studioRomSaved(Studio* studio)
 
 void studioRomLoaded(Studio* studio)
 {
+#if defined(TIC_BUILD_WITH_REMOTING)
     remoting_note_cart_loaded(studio, false);
+#endif
     initModules(studio);
 
     updateTitle(studio);
@@ -2154,7 +2169,9 @@ bool studioCartChanged(Studio* studio)
 void runGame(Studio* studio)
 {
 #if defined(BUILD_EDITORS)
+#if defined(TIC_BUILD_WITH_REMOTING)
     remoting_note_cart_launched(studio);
+#endif
     studioRemotingCartRun(studio);
 
     if (studio->config->data.fft) {
@@ -3078,12 +3095,14 @@ void studio_tick(Studio* studio, tic80_input input)
     tic_mem* tic = studio->tic;
     tic->ram->input = input;
 
-#if defined(BUILD_EDITORS)
+#if defined(TIC_BUILD_WITH_REMOTING)
     if(studio->remoting)
     {
         ticbuild_remoting_tick(studio->remoting);
     }
+#endif
 
+#if defined(BUILD_EDITORS)
     processAnim(studio->anim.movie, studio);
     checkChanges(studio);
     tic_net_start(studio->net);
@@ -3185,6 +3204,7 @@ void studio_tick(Studio* studio, tic80_input input)
             }
         }
 
+#if defined(TIC_BUILD_WITH_REMOTING)
         if(studio->remoting)
         {
             tb_lua_profiler_status profiler_status;
@@ -3211,6 +3231,7 @@ void studio_tick(Studio* studio, tic80_input input)
             if(ticbuild_remoting_take_title_dirty(studio->remoting))
                 studio->title_pending = true;
         }
+#endif
 
         if(studio->title_pending)
         {
@@ -3338,13 +3359,15 @@ void exitGame(Studio* studio)
 void studio_delete(Studio* studio)
 {
     {
-#if defined(BUILD_EDITORS)
+#if defined(TIC_BUILD_WITH_REMOTING)
         if(studio->remoting)
         {
             ticbuild_remoting_close(studio->remoting);
             studio->remoting = NULL;
         }
+#endif
 
+#if defined(BUILD_EDITORS)
         for(s32 i = 0; i < TIC_EDITOR_BANKS; i++)
         {
             freeSprite  (studio->banks.sprite[i]);
@@ -3424,9 +3447,11 @@ static StartArgs parseArgs(s32 argc, char **argv)
 #undef  CMD_PARAMS_DEF
 #if defined(BUILD_EDITORS)
 
+#if defined(TIC_BUILD_WITH_REMOTING)
         OPT_INTEGER('\0', "remoting-port", &args.remotingPort, "listen on 127.0.0.1:<port> for ticbuild remoting"),
         OPT_STRING('\0', "remote-session-location", &args.remoteSessionLocation, "directory to write remoting discovery file"),
         OPT_STRING('\0', "global-disco", &args.globalDisco, "enable or disable global discovery file (ON|OFF)"),
+#endif
     OPT_STRING('\0', "hud-palette-text", &args.hudPaletteText, "perf HUD text palette color (auto, 0-15, rgb, or rrggbb)"),
     OPT_STRING('\0', "hud-palette-outline", &args.hudPaletteOutline, "perf HUD outline palette color (auto, 0-15, rgb, or rrggbb)"),
     OPT_STRING('\0', "hud-palette-ok", &args.hudPaletteOk, "perf HUD OK palette color (auto, 0-15, rgb, or rrggbb)"),
@@ -3460,6 +3485,7 @@ static StartArgs parseArgs(s32 argc, char **argv)
     argparse_describe(&argparse, "\n" TIC_NAME " startup options:", NULL);
     argc = argparse_parse(&argparse, argc, (const char**)argv);
 
+#if defined(TIC_BUILD_WITH_REMOTING)
     if(args.globalDisco && args.globalDisco[0])
     {
         const char* s = args.globalDisco;
@@ -3468,6 +3494,7 @@ static StartArgs parseArgs(s32 argc, char **argv)
         else if(toupper((unsigned char)s[0]) == 'O' && toupper((unsigned char)s[1]) == 'N')
             args.globalDiscoEnabled = true;
     }
+#endif
 
     if(argc == 1)
         args.cart = argv[0];
@@ -3586,16 +3613,20 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .samplerate = samplerate,
         .net = tic_net_create(TIC_WEBSITE),
 
+#if defined(TIC_BUILD_WITH_REMOTING)
         .remoting = NULL,
         .remotingPort = 0,
+#endif
 
         .perfHudMode = TB_PERF_HUD_OFF,
         .title_last_counter = 0,
         .title_pending = false,
+#if defined(TIC_BUILD_WITH_REMOTING)
         .remoting_process_started_at = remoting_unix_epoch_ms(),
         .remoting_cart_loaded_at = 0,
         .remoting_cart_last_launch_at = 0,
         .remoting_cart_hash_valid = false,
+#endif
 
         .bytebattle = {0},
 #endif
@@ -3694,6 +3725,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
 #if defined(BUILD_EDITORS)
     initConsole(studio->console, studio, studio->fs, studio->net, studio->config, args);
 
+#if defined(TIC_BUILD_WITH_REMOTING)
     if(args.remotingPort > 0)
     {
         studio->remotingPort = args.remotingPort;
@@ -3722,6 +3754,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
 
         studio->remoting = ticbuild_remoting_create(studio->remotingPort, args.remoteSessionLocation, args.globalDiscoEnabled, &cb);
     }
+#endif // defined(TIC_BUILD_WITH_REMOTING)
 
     initSurfMode(studio);
     initModules(studio);
