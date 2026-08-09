@@ -249,8 +249,6 @@ struct Studio
     tb_perf_hud_mode perfHudMode;
     tb_perf_metrics perfFrame;
     tb_title_stats titleStats;
-    uint64_t title_last_counter;
-    bool title_pending;
 
 #if defined(TIC_BUILD_WITH_REMOTING)
     TicbuildRemoting* remoting;
@@ -286,6 +284,8 @@ struct Studio
     s32 samplerate;
     tic_audio_capture* audioCapture;
     bool audioCaptureErrorNotified;
+    uint64_t title_last_counter;
+    bool title_pending;
     tic_font systemFont;
 
 };
@@ -2208,7 +2208,24 @@ static void updateTitle(Studio* studio)
 #if defined(BUILD_EDITORS)
     if(strlen(studio->console->rom.name))
         snprintf(name, TICNAME_MAX, "%s [%s]", TIC_NAME, studio->console->rom.name);
+#endif
 
+    tic_audio_capture_state captureState = tic_audio_capture_status(studio->audioCapture);
+    switch (captureState)
+    {
+        // show title bar status when not idle.
+        case TIC_AUDIO_CAPTURE_IDLE:
+        case TIC_AUDIO_CAPTURE_COMPLETE:
+        {
+            char full[TICNAME_MAX];
+            snprintf(full, TICNAME_MAX, "%s | AUDIO CAP: %s", name, tic_audio_capture_state_name(captureState));
+            strncpy(name, full, TICNAME_MAX - 1);
+            name[TICNAME_MAX - 1] = '\0';
+        }
+        break;
+    }
+
+#if defined(BUILD_EDITORS)
     {
         char extra[256];
         tb_title_stats_get_title_info(&studio->titleStats, extra, sizeof extra);
@@ -2492,6 +2509,21 @@ static inline bool keyWasPressedOnce(Studio* studio, s32 key)
     return tic_api_keyp(tic, key, -1, -1);
 }
 
+static void toggleAudioCapture(Studio* studio)
+{
+    switch(studio_audio_capture_status(studio, NULL))
+    {
+    case TIC_AUDIO_CAPTURE_CAPTURING:
+        studio_audio_capture_end(studio);
+        break;
+    case TIC_AUDIO_CAPTURE_STOPPING:
+        break;
+    default:
+        studio_audio_capture_start(studio);
+        break;
+    }
+}
+
 static void gotoFullscreen(Studio* studio)
 {
     tic_sys_fullscreen_set(studio->config->data.options.fullscreen = !tic_sys_fullscreen_get());
@@ -2602,8 +2634,10 @@ static void processShortcuts(Studio* studio)
 
     if(alt)
     {
+        if(keyWasPressedOnce(studio, tic_key_r))
+            toggleAudioCapture(studio);
 #if defined(BUILD_EDITORS)
-        if(keyWasPressedOnce(studio, tic_key_0))
+        else if(keyWasPressedOnce(studio, tic_key_0))
         {
             studio->perfHudMode = (tb_perf_hud_mode)((studio->perfHudMode + 1) % 3);
             const char* label = "PERF HUD OFF";
@@ -2626,7 +2660,7 @@ static void processShortcuts(Studio* studio)
             showPopupMessage(studio, buf);
         }
 #endif
-        if (enterWasPressedOnce(studio)) gotoFullscreen(studio);
+        else if(enterWasPressedOnce(studio)) gotoFullscreen(studio);
 #if defined(BUILD_EDITORS)
         else if(studio->mode != TIC_RUN_MODE && studio->config->data.keyboardLayout != tic_layout_azerty)
         {
@@ -3260,6 +3294,9 @@ void studio_tick(Studio* studio, tic80_input input)
             ? tic_core_blit_ex(tic, callback[studio->mode])
             : tic_core_blit(tic);
 
+        uint64_t counter = tic_sys_counter_get();
+        uint64_t freq = tic_sys_freq_get();
+
 #if defined(BUILD_EDITORS)
         if(studio->mode == TIC_RUN_MODE)
         {
@@ -3280,9 +3317,6 @@ void studio_tick(Studio* studio, tic80_input input)
                 studio->perfFrame.custom_label[i][sizeof studio->perfFrame.custom_label[i] - 1] = '\0';
             }
         }
-
-        uint64_t counter = tic_sys_counter_get();
-        uint64_t freq = tic_sys_freq_get();
 
         tb_title_stats_set_lua_perf(
             &studio->titleStats,
@@ -3347,6 +3381,7 @@ void studio_tick(Studio* studio, tic80_input input)
                 studio->title_pending = true;
         }
 #endif
+#endif
 
         if(studio->title_pending)
         {
@@ -3361,7 +3396,6 @@ void studio_tick(Studio* studio, tic80_input input)
                 studio->title_pending = false;
             }
         }
-#endif
 
         blitCursor(studio);
 
@@ -3411,6 +3445,11 @@ void studio_tick(Studio* studio, tic80_input input)
 
 static const char AudioCaptureFilename[] = "audio-capture.wav";
 
+static void markAudioCaptureTitleDirty(Studio* studio)
+{
+    studio->title_pending = true;
+}
+
 static void notifyAudioCaptureError(Studio* studio)
 {
     if(studio->audioCaptureErrorNotified)
@@ -3421,6 +3460,7 @@ static void notifyAudioCaptureError(Studio* studio)
         return;
 
     studio->audioCaptureErrorNotified = true;
+    markAudioCaptureTitleDirty(studio);
     fprintf(stderr, "audio capture: %s\n", error);
 
 #if defined(__EMSCRIPTEN__)
@@ -3436,6 +3476,7 @@ static void notifyAudioCaptureError(Studio* studio)
 static const char* onAudioCaptureComplete(void* data, const uint8_t* wav, size_t size)
 {
     Studio* studio = data;
+    markAudioCaptureTitleDirty(studio);
     if(!tic_fs_saveroot(studio->fs, AudioCaptureFilename, wav, (s32)size, true))
         return "failed to save audio-capture.wav";
 
@@ -3466,12 +3507,16 @@ bool studio_audio_capture_start(Studio* studio)
     else
         notifyAudioCaptureError(studio);
 
+    markAudioCaptureTitleDirty(studio);
     return started;
 }
 
 bool studio_audio_capture_end(Studio* studio)
 {
-    return studio && tic_audio_capture_end(studio->audioCapture);
+    bool ended = studio && tic_audio_capture_end(studio->audioCapture);
+    if(studio)
+        markAudioCaptureTitleDirty(studio);
+    return ended;
 }
 
 tic_audio_capture_state studio_audio_capture_status(Studio* studio, const char** detail)
@@ -3822,6 +3867,8 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         .prevMode = TIC_CODE_MODE,
         .samplerate = samplerate,
         .audioCapture = tic_audio_capture_create(),
+        .title_last_counter = 0,
+        .title_pending = false,
 
 #if defined(BUILD_EDITORS)
         .menuMode = TIC_CONSOLE_MODE,
@@ -3858,8 +3905,6 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
 #endif
 
         .perfHudMode = TB_PERF_HUD_OFF,
-        .title_last_counter = 0,
-        .title_pending = false,
 #if defined(TIC_BUILD_WITH_REMOTING)
         .remoting_process_started_at = remoting_unix_epoch_ms(),
         .remoting_cart_loaded_at = 0,

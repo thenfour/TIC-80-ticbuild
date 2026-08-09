@@ -29,6 +29,9 @@ Module.onAudioCaptureComplete = ({ filename, mimeType, bytes }) => {};
 Module.onAudioCaptureError = ({ message }) => {};
 ```
 
+Press <kbd>ALT+R</kbd> to toggle audio capture from the standalone studio. While
+the capture state is not `idle`, the current state is shown in the window title.
+
 # original readme:
 
 [![Build Status](https://github.com/nesbox/TIC-80/workflows/Build/badge.svg)](https://github.com/nesbox/TIC-80/actions?query=workflow%3ABuild)
