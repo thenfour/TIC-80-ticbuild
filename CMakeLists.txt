@@ -20,6 +20,7 @@ endif()
 
 message("Building for target : ${CMAKE_SYSTEM_NAME}")
 message("PROJECT_VERSION: ${PROJECT_VERSION}${VERSION_STATUS}")
+message("TICBUILD_VERSION: ${TICBUILD_VERSION}")
 message("VERSION_HASH: ${VERSION_HASH}")
 
 configure_file("${PROJECT_SOURCE_DIR}/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/version.h")

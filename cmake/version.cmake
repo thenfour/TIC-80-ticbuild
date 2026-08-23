@@ -1,3 +1,5 @@
+include("${CMAKE_CURRENT_LIST_DIR}/ticbuild-version.cmake")
+
 set(VERSION_MAJOR 1)
 set(VERSION_MINOR 2)
 set(VERSION_REVISION 0)

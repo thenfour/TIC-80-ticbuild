@@ -17,6 +17,7 @@ extern "C"
         void* userdata;
 
         void (*hello)(void* userdata, char* out, size_t outcap);
+        void (*version)(void* userdata, char* out, size_t outcap);
 
         bool (*load)(void* userdata, const char* cart_path, bool run, char* err, size_t errcap);
         bool (*restart)(void* userdata, char* err, size_t errcap);

@@ -147,6 +147,7 @@ binds to `127.0.0.1`. Up to 10 clients supported.
     - named args not supported (yet)
   - commands supported:
     - `hello` - returns a description of the system (TIC-80 remoting v1)
+    - `version` - returns the TIC-80 version, including the ticbuild fork version.
     - `load <cart_path.tic> <run:1|0>`, e.g. `load "c:\\xyz.tic" 1`.
       If the run flag is `0`, the cart is just loaded. If `1`, the cart is
       launched after successful load.

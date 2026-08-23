@@ -542,6 +542,16 @@ static void remoting_hello(void* userdata, char* out, size_t outcap)
     snprintf(out, outcap, "%s remoting v1", TIC_NAME);
 }
 
+static void remoting_version(void* userdata, char* out, size_t outcap)
+{
+    (void)userdata;
+
+    if(!out || outcap == 0)
+        return;
+
+    snprintf(out, outcap, "%s", TIC_VERSION);
+}
+
 static bool remoting_load(void* userdata, const char* cart_path, bool run, char* err, size_t errcap)
 {
     Studio* studio = (Studio*)userdata;
@@ -4166,6 +4176,7 @@ Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_f
         {
             .userdata = studio,
             .hello = remoting_hello,
+            .version = remoting_version,
             .load = remoting_load,
             .restart = remoting_restart,
             .quit = remoting_quit,

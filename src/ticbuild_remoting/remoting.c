@@ -937,6 +937,35 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         return;
     }
 
+    if(strcmp(cmd, "version") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> version");
+            return;
+        }
+
+        if(!ctx->cb.version)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "version not supported");
+            return;
+        }
+
+        char buf[256] = {0};
+        ctx->cb.version(ctx->cb.userdata, buf, sizeof buf);
+
+        char esc[300];
+        tb_escape_string(buf, strlen(buf), esc, sizeof esc);
+        char data[340];
+        snprintf(data, sizeof data, "\"%s\"", esc);
+
+        tb_free_args(args, argc);
+        tb_send_response_str(client, id, true, data);
+        return;
+    }
+
     if(strcmp(cmd, "event_subscribe") == 0)
     {
         if(argc != 2 || args[0].type != TB_ARG_STR || args[1].type != TB_ARG_INT)
