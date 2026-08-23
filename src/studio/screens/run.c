@@ -53,6 +53,17 @@ static void onError(void* data, const char* info)
 #endif
 }
 
+static void onScriptError(void* data, const tic_script_error* error)
+{
+#if defined(TIC_BUILD_WITH_REMOTING)
+    Run* run = (Run*)data;
+    studioRemotingScriptError(run->studio, error);
+#else
+    (void)data;
+    (void)error;
+#endif
+}
+
 #if defined(TIC_BUILD_WITH_REMOTING)
 static bool onPostBoot(void* data, tic_mem* tic)
 {
@@ -228,6 +239,7 @@ void initRun(Run* run, Console* console, tic_fs* fs, Studio* studio)
         .tickData = (tic_tick_data)
         {
             .error = onError,
+            .scriptError = onScriptError,
             .trace = onTrace,
             .exit = onExit,
             .data = run,

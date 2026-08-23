@@ -45,11 +45,8 @@ static bool initLua(tic_mem* tic, const char* code)
 
         lua_settop(lua, 0);
 
-        if(luaL_loadstring(lua, code) != LUA_OK || lua_pcall(lua, 0, LUA_MULTRET, 0) != LUA_OK)
-        {
-            core->data->error(core->data->data, lua_tostring(lua, -1));
+        if(!luaapi_execute(core, code, "cart", "chunk"))
             return false;
-        }
     }
 
     return true;
@@ -135,10 +132,7 @@ static void evalLua(tic_mem* tic, const char* code)
 
     lua_settop(lua, 0);
 
-    if(luaL_loadstring(lua, code) != LUA_OK || lua_pcall(lua, 0, LUA_MULTRET, 0) != LUA_OK)
-    {
-        core->data->error(core->data->data, lua_tostring(lua, -1));
-    }
+    luaapi_execute(core, code, "eval", "eval");
 }
 
 static const u8 DemoRom[] =

@@ -42,9 +42,12 @@ if(BUILD_EDITORS)
     if(NOT EMSCRIPTEN)
         set(TIC80STUDIO_SRC ${TIC80STUDIO_SRC}
             ${TIC80LIB_DIR}/ticbuild_remoting/remoting.c
+            ${TIC80LIB_DIR}/ticbuild_remoting/binary_literal.c
             ${TIC80LIB_DIR}/ticbuild_remoting/discovery.c
+            ${TIC80LIB_DIR}/ticbuild_remoting/json_writer.c
             ${TIC80LIB_DIR}/ticbuild_remoting/lua_eval.c
             ${TIC80LIB_DIR}/ticbuild_remoting/lua_serialize.c
+            ${TIC80LIB_DIR}/ticbuild_remoting/script_error_payload.c
         )
         set(TIC_BUILD_WITH_REMOTING ON)
     endif()

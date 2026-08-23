@@ -494,6 +494,23 @@ void studioRemotingTrace(Studio* studio, const char* text)
         ticbuild_remoting_emit_trace(studio->remoting, text);
 }
 
+void studioRemotingScriptError(Studio* studio, const tic_script_error* error)
+{
+    if(!studio || !studio->remoting || !studio->tic || !error)
+        return;
+
+    size_t code_size = 0;
+    while(code_size < sizeof studio->tic->cart.code.data && studio->tic->cart.code.data[code_size])
+        code_size++;
+
+    u8 digest[MD5_HASHSIZE];
+    char hash[sizeof "md5:" + MD5_HASHSIZE * 2];
+    md5(studio->tic->cart.code.data, (s32)code_size, digest);
+    memcpy(hash, "md5:", sizeof "md5:" - 1);
+    tic_tool_buf2str(digest, sizeof digest, hash + sizeof "md5:" - 1, false);
+    ticbuild_remoting_emit_script_error(studio->remoting, error, hash);
+}
+
 void studioRemotingCartRun(Studio* studio)
 {
     if(studio && studio->remoting)
@@ -938,6 +955,7 @@ static bool remoting_lua_profiler_status(void* userdata, tb_text_buffer* out, ch
 #else
 void studioRemotingCartLoaded(Studio* studio) { (void)studio; }
 void studioRemotingTrace(Studio* studio, const char* text) { (void)studio; (void)text; }
+void studioRemotingScriptError(Studio* studio, const tic_script_error* error) { (void)studio; (void)error; }
 void studioRemotingCartRun(Studio* studio) { (void)studio; }
 void studioRemotingLuaProfilerStopped(Studio* studio) { (void)studio; }
 #endif

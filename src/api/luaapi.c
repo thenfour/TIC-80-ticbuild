@@ -32,11 +32,16 @@
 #define HMR_FN "HMR"
 #define HMR_SAVE_REGISTRY_KEY "ticbuild.hmr.save"
 
+static char LuaCoreRegistryKey;
+
 #if defined(BUILD_EDITORS)
 #include "ticbuild_remoting/lua_perf.h"
 #endif
 
 extern bool parse_note(const char* noteStr, s32* note, s32* octave);
+
+static s32 docall(tic_core* core, lua_State* lua, s32 narg, s32 nres, const char* phase);
+static void reportScriptError(tic_core* core, const char* fallback);
 
 static inline s32 getLuaNumber(lua_State* lua, s32 index)
 {
@@ -53,6 +58,14 @@ static void registerLuaFunction(tic_core* core, lua_CFunction func, const char *
 static tic_core* getLuaCore(lua_State* lua)
 {
     tic_core* core = lua_touserdata(lua, lua_upvalueindex(1));
+    return core;
+}
+
+static tic_core* getRegisteredLuaCore(lua_State* lua)
+{
+    lua_rawgetp(lua, LUA_REGISTRYINDEX, &LuaCoreRegistryKey);
+    tic_core* core = lua_touserdata(lua, -1);
+    lua_pop(lua, 1);
     return core;
 }
 
@@ -822,20 +835,30 @@ static s32 lua_mset(lua_State* lua)
 
 typedef struct
 {
+    tic_core* core;
     lua_State* lua;
     s32 reg;
+    bool failed;
 } RemapData;
 
 static void remapCallback(void* data, s32 x, s32 y, RemapResult* result)
 {
     RemapData* remap = (RemapData*)data;
     lua_State* lua = remap->lua;
+    if(remap->failed)
+        return;
 
     lua_rawgeti(lua, LUA_REGISTRYINDEX, remap->reg);
     lua_pushinteger(lua, result->index);
     lua_pushinteger(lua, x);
     lua_pushinteger(lua, y);
-    lua_pcall(lua, 3, 3, 0);
+    // in prod tic80 the pcall return is ignored so errors may not be reported properly.
+    if(docall(remap->core, lua, 3, 3, "map remap") != LUA_OK)
+    {
+        remap->failed = true;
+        reportScriptError(remap->core, lua_tostring(lua, -1));
+        return;
+    }
 
     result->index = getLuaNumber(lua, -3);
     result->flip = getLuaNumber(lua, -2);
@@ -907,9 +930,8 @@ static s32 lua_map(lua_State* lua)
                             {
                                 s32 remap = luaL_ref(lua, LUA_REGISTRYINDEX);
 
-                                RemapData data = {lua, remap};
-
                                 tic_core* core = getLuaCore(lua);
+                                RemapData data = {.core = core, .lua = lua, .reg = remap, .failed = false};
                                 tic_mem* tic = (tic_mem*)core;
 
                                 core->api.map(tic, x, y, w, h, sx, sy, colors, count, scale, remapCallback, &data);
@@ -1806,6 +1828,17 @@ void luaapi_init(tic_core* core)
 #endif
     };
 
+    lua_State* lua = core->currentVM;
+
+    /*
+    docall runs for every TIC/SCN/BDR/remap callback; performance-critical.
+    Store core once in the lua registry instead of GC-invoking upvalues.
+    */
+    lua_pushlightuserdata(lua, core);
+    lua_rawsetp(lua, LUA_REGISTRYINDEX, &LuaCoreRegistryKey);
+    core->luaCall.phase = NULL;
+    core->luaCall.errorInitialized = false;
+
     for (s32 i = 0; i < COUNT_OF(ApiItems); i++)
         registerLuaFunction(core, ApiItems[i].func, ApiItems[i].name);
 
@@ -1827,24 +1860,116 @@ void luaapi_close(tic_mem* tic)
     {
         lua_close(core->currentVM);
         core->currentVM = NULL;
+        core->luaCall.phase = NULL;
+        core->luaCall.errorInitialized = false;
     }
 }
 
+
+// little helper.
+static void copyErrorText(char* dest, size_t capacity, const char* source)
+{
+    if(!dest || capacity == 0)
+        return;
+
+    snprintf(dest, capacity, "%s", source ? source : "");
+}
+
+static void beginScriptError(tic_core* core, const char* kind, const char* phase)
+{
+    if(!core)
+        return;
+
+    tic_script_error* error = &core->scriptError;
+    memset(error, 0, sizeof *error);
+    error->schemaVersion = 1;
+    copyErrorText(error->language, sizeof error->language, "lua");
+    copyErrorText(error->kind, sizeof error->kind, kind);
+    copyErrorText(error->phase, sizeof error->phase, phase);
+}
+
+static void captureLuaFrames(lua_State* lua, tic_script_error* error)
+{
+    lua_Debug frame;
+    s32 level = 1; // skip this message handler
+
+    while(error->frameCount < TIC_SCRIPT_ERROR_MAX_FRAMES && lua_getstack(lua, level, &frame))
+    {
+        if(!lua_getinfo(lua, "nSltu", &frame))
+            break;
+
+        tic_script_error_frame* out = &error->frames[error->frameCount++];
+        const char* source = frame.source;
+        if(source && (*source == '=' || *source == '@'))
+            source++;
+        else if(!source || !source[0])
+            source = frame.short_src;
+
+        copyErrorText(out->source, sizeof out->source, source);
+        copyErrorText(out->name, sizeof out->name, frame.name);
+        copyErrorText(out->nameWhat, sizeof out->nameWhat, frame.namewhat);
+        copyErrorText(out->what, sizeof out->what, frame.what);
+        out->currentLine = frame.currentline;
+        out->lineDefined = frame.linedefined;
+        out->lastLineDefined = frame.lastlinedefined;
+        out->parameterCount = frame.nparams;
+        out->upvalueCount = frame.nups;
+        out->variadic = frame.isvararg != 0;
+        out->tailCall = frame.istailcall != 0;
+        level++;
+    }
+
+    error->framesTruncated = error->frameCount == TIC_SCRIPT_ERROR_MAX_FRAMES
+        && lua_getstack(lua, level, &frame);
+}
+
+static void reportScriptError(tic_core* core, const char* fallback)
+{
+    if(!core || !core->data)
+        return;
+
+    tic_script_error* error = &core->scriptError;
+    if(!error->message[0])
+        copyErrorText(error->message, sizeof error->message, fallback ? fallback : "Lua error");
+    if(!error->traceback[0])
+        copyErrorText(error->traceback, sizeof error->traceback, error->message);
+
+    if(core->data->scriptError)
+        core->data->scriptError(core->data->data, error);
+    if(core->data->error)
+        core->data->error(core->data->data, error->traceback);
+}
+
 /*
-** Message handler which appends stract trace to exceptions.
-** This function was extractred from lua.c.
+** Message handler which captures structured frames before Lua unwinds them,
+** then preserves the existing console traceback behavior.
 */
 static int msghandler (lua_State *lua)
 {
+    tic_core* core = getRegisteredLuaCore(lua);
+
+    if(core)
+    {
+        beginScriptError(core, "runtime", core->luaCall.phase);
+        core->luaCall.errorInitialized = true;
+    }
+
     const char *msg = lua_tostring(lua, 1);
     if (msg == NULL) /* is error object not a string? */
     {
         if (luaL_callmeta(lua, 1, "__tostring") &&  /* does it have a metamethod */
             lua_type(lua, -1) == LUA_TSTRING)  /* that produces a string? */
-            return 1;  /* that is the message */
+            msg = lua_tostring(lua, -1);
         else
             msg = lua_pushfstring(lua, "(error object is a %s value)", luaL_typename(lua, 1));
     }
+
+    if(core)
+    {
+        copyErrorText(core->scriptError.message, sizeof core->scriptError.message, msg);
+        captureLuaFrames(lua, &core->scriptError);
+    }
+
     /* call the debug.traceback function instead of luaL_traceback so */
     /* customized sourcemap-aware debug.traceback can give better line numbers */
     lua_getglobal(lua, "debug");
@@ -1852,6 +1977,10 @@ static int msghandler (lua_State *lua)
     lua_gettable(lua, -2);
     lua_pushstring(lua, msg);
     lua_call(lua, 1, 1);
+
+    if(core)
+        copyErrorText(core->scriptError.traceback, sizeof core->scriptError.traceback, lua_tostring(lua, -1));
+
     return 1;  /* return the traceback */
 }
 
@@ -1860,15 +1989,90 @@ static int msghandler (lua_State *lua)
 ** Please use this function for all top level lua functions.
 ** This function was extractred from lua.c (and stripped of signal handling)
 */
-static s32 docall (lua_State *lua, s32 narg, s32 nres)
+static s32 docall (tic_core* core, lua_State *lua, s32 narg, s32 nres, const char* phase)
 {
-    s32 status = 0;
     s32 base = lua_gettop(lua) - narg;  /* function index */
-    lua_pushcfunction(lua, msghandler);  /* push message handler */
+
+    /*
+    ** Protected calls can nest (for example, map remap callbacks invoked by
+    ** TIC). Save and restore this tiny context so the inner phase cannot leak
+    ** into an outer error, while keeping the successful hot path allocation-free.
+    */
+    const char* previousPhase = core->luaCall.phase;
+    bool previousErrorInitialized = core->luaCall.errorInitialized;
+    core->luaCall.phase = phase;
+    core->luaCall.errorInitialized = false;
+
+    lua_pushcfunction(lua, msghandler);  /* zero-upvalue handler does not allocate */
     lua_insert(lua, base);  /* put it under function and args */
-    status = lua_pcall(lua, narg, nres, base);
+    s32 status = lua_pcall(lua, narg, nres, base);
     lua_remove(lua, base);  /* remove message handler from the stack */
+
+    bool errorInitialized = core->luaCall.errorInitialized;
+    core->luaCall.phase = previousPhase;
+    core->luaCall.errorInitialized = previousErrorInitialized;
+
+    /* A failing message handler can bypass normal capture; initialize lazily here too. */
+    if(status != LUA_OK && !errorInitialized)
+    {
+        beginScriptError(core, "runtime", phase);
+        copyErrorText(core->scriptError.message, sizeof core->scriptError.message, lua_tostring(lua, -1));
+    }
+
     return status;
+}
+
+// effectively replaces the
+// luaL_loadstring(lua, code);
+// lua_pcall(lua, 0, LUA_MULTRET, 0);
+// pattern in stock tic80.
+// that only forwards the final error string, not the structured complete stack info.
+// so this handles
+// * compilation errors (luaL_loadbuffer), kind=syntax
+// * runtime errors  (docall), kind=runtime
+bool luaapi_execute(tic_core* core, const char* code, const char* chunkName, const char* phase)
+{
+    lua_State* lua = core ? core->currentVM : NULL;
+    if(!lua)
+        return false;
+
+    char sourceName[TIC_SCRIPT_ERROR_SOURCE_SIZE + 2];
+    snprintf(sourceName, sizeof sourceName, "=%s", chunkName ? chunkName : "chunk");
+
+    const char* source = code ? code : "";
+    if(luaL_loadbuffer(lua, source, strlen(source), sourceName) != LUA_OK)
+    {
+        const char* message = lua_tostring(lua, -1);
+        beginScriptError(core, "syntax", phase);
+        copyErrorText(core->scriptError.message, sizeof core->scriptError.message, message);
+        copyErrorText(core->scriptError.traceback, sizeof core->scriptError.traceback, message);
+
+        tic_script_error_frame* frame = &core->scriptError.frames[0];
+        core->scriptError.frameCount = 1;
+        copyErrorText(frame->source, sizeof frame->source, chunkName ? chunkName : "chunk");
+        copyErrorText(frame->name, sizeof frame->name, "<main>");
+        copyErrorText(frame->what, sizeof frame->what, "main");
+
+        const char* separator = message ? strchr(message, ':') : NULL;
+        if(separator)
+        {
+            char* end = NULL;
+            long line = strtol(separator + 1, &end, 10);
+            if(end != separator + 1 && line > 0 && line <= INT32_MAX)
+                frame->currentLine = (s32)line;
+        }
+
+        reportScriptError(core, message);
+        return false;
+    }
+
+    if(docall(core, lua, 0, LUA_MULTRET, phase) != LUA_OK)
+    {
+        reportScriptError(core, lua_tostring(lua, -1));
+        return false;
+    }
+
+    return true;
 }
 
 static void reportHmrError(tic_core* core, const char* message)
@@ -1896,7 +2100,7 @@ bool luaapi_hmr_push_saved_value(tic_mem* tic)
 
     // Saver failures are intentionally silent: HMR continuity is best-effort
     // and must never prevent the next cart from loading.
-    if(docall(lua, 0, 1) != LUA_OK || lua_isnil(lua, -1))
+    if(docall(core, lua, 0, 1, "HMR save") != LUA_OK || lua_isnil(lua, -1))
     {
         lua_settop(lua, 0);
         return false;
@@ -1960,20 +2164,23 @@ luaapi_hmr_result luaapi_hmr_restore(tic_mem* tic, const char* saved, size_t sav
         const int loadStatus = luaL_loadbuffer(lua, chunk, chunkSize, "=HMR state");
         free(chunk);
 
-        if(loadStatus != LUA_OK || docall(lua, 0, 1) != LUA_OK)
+        if(loadStatus != LUA_OK || docall(core, lua, 0, 1, "HMR restore state") != LUA_OK)
         {
             const char* message = lua_tostring(lua, -1);
-            reportHmrError(core, message);
+            if(loadStatus == LUA_OK)
+                reportScriptError(core, message);
+            else
+                reportHmrError(core, message);
             lua_settop(lua, 0);
             return LUAAPI_HMR_ERROR;
         }
     }
     else lua_pushnil(lua);
 
-    if(docall(lua, 1, 1) != LUA_OK)
+    if(docall(core, lua, 1, 1, "HMR") != LUA_OK)
     {
         const char* message = lua_tostring(lua, -1);
-        reportHmrError(core, message);
+        reportScriptError(core, message);
         lua_settop(lua, 0);
         return LUAAPI_HMR_ERROR;
     }
@@ -2007,9 +2214,9 @@ void luaapi_tick(tic_mem* tic)
         lua_getglobal(lua, TIC_FN);
         if(lua_isfunction(lua, -1))
         {
-            if(docall(lua, 0, 0) != LUA_OK)
+            if(docall(core, lua, 0, 0, TIC_FN) != LUA_OK)
             {
-                core->data->error(core->data->data, lua_tostring(lua, -1));
+                reportScriptError(core, lua_tostring(lua, -1));
                 return;
             }
 
@@ -2021,8 +2228,8 @@ void luaapi_tick(tic_mem* tic)
                 {
                     OVR(core)
                     {
-                        if(docall(lua, 0, 0) != LUA_OK)
-                            core->data->error(core->data->data, lua_tostring(lua, -1));
+                        if(docall(core, lua, 0, 0, OVR_FN) != LUA_OK)
+                            reportScriptError(core, lua_tostring(lua, -1));
                     }
                 }
                 else lua_pop(lua, 1);
@@ -2048,8 +2255,8 @@ void callLuaIntCallback(tic_mem* tic, s32 value, void* data, const char* name)
         if(lua_isfunction(lua, -1))
         {
             lua_pushinteger(lua, value);
-            if(docall(lua, 1, 0) != LUA_OK)
-                core->data->error(core->data->data, lua_tostring(lua, -1));
+            if(docall(core, lua, 1, 0, name) != LUA_OK)
+                reportScriptError(core, lua_tostring(lua, -1));
         }
         else lua_pop(lua, 1);
     }
@@ -2083,8 +2290,8 @@ void luaapi_boot(tic_mem* tic)
         lua_getglobal(lua, BOOT_FN);
         if(lua_isfunction(lua, -1))
         {
-            if(docall(lua, 0, 0) != LUA_OK)
-                core->data->error(core->data->data, lua_tostring(lua, -1));
+            if(docall(core, lua, 0, 0, BOOT_FN) != LUA_OK)
+                reportScriptError(core, lua_tostring(lua, -1));
         }
         else lua_pop(lua, 1);
     }

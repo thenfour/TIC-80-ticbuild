@@ -239,6 +239,7 @@ void studioRomSaved(Studio* studio);
 void studioConfigChanged(Studio* studio);
 void studioRemotingCartLoaded(Studio* studio);
 void studioRemotingTrace(Studio* studio, const char* text);
+void studioRemotingScriptError(Studio* studio, const tic_script_error* error);
 void studioRemotingCartRun(Studio* studio);
 void studioRemotingLuaProfilerStopped(Studio* studio);
 #if defined(TIC_BUILD_WITH_REMOTING)

@@ -191,6 +191,10 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       types with `1`; `0` will unsubscribe. Event types that aren't specified here are unaffected.
       Example: `0 event_subscribe "trace|cart_run" 1` enables
       receiving `trace()` and cart run events pushed from server to client (and other event types remain unaffected)
+    - `script_error_last` - returns the latest structured Lua error payload for the current cart run, or no data
+      when no error has occurred. This let's a client get failure info for
+      a crash that happened before it had the opportunity to subscribe.
+      Cleared by the next `cart_run` event.
 
   - datatypes
     - numbers (integral, negative, decimal)
@@ -230,7 +234,8 @@ binds to `127.0.0.1`. Up to 10 clients supported.
       - `-1 trace "hello from tic80"` sent for all `trace()` Lua calls.
       - `-2 cart_run` sent when cart is launched / game is run (ctrl+R)
       - `-3 lua_profiler_stopped` sent when the lua profiler finishes
-      - (this is the only one supported so far)
+      - `-4 script_error <hex-json>` sent when Lua compilation or execution fails. The binary token contains
+        UTF-8 JSON with error info (stack trace et al). See below for an example of the json `script_error` can return.
 - Commands to be queued and executed at a deterministic safe point in the
   TIC-80 system loop (e.g., between frames if the cart is running)
 
@@ -598,3 +603,5 @@ the normal `CHUNK_CODE` conventions: concatenated in reverse bank order before
 decompressing.
 
 - Note: The zipped payload must be zero-terminated due to internal handling.
+
+# script_error payload

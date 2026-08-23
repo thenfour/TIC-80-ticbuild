@@ -1,6 +1,6 @@
 #include "ticbuild_remoting/remoting.h"
+#include "api.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +27,10 @@ void ticbuild_remoting_emit_trace(TicbuildRemoting* ctx, const char* text)
 {
     (void)ctx; (void)text;
 }
+void ticbuild_remoting_emit_script_error(TicbuildRemoting* ctx, const tic_script_error* error, const char* code_hash)
+{
+    (void)ctx; (void)error; (void)code_hash;
+}
 
 void ticbuild_remoting_on_frame(TicbuildRemoting* ctx, uint64_t counter, uint64_t freq) { (void)ctx; (void)counter; (void)freq; }
 int ticbuild_remoting_get_fps(const TicbuildRemoting* ctx) { (void)ctx; return 0; }
@@ -51,7 +55,9 @@ bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx) { (void)ctx; retu
 
 #else
 
+#include "ticbuild_remoting/binary_literal.h"
 #include "ticbuild_remoting/discovery.h"
+#include "ticbuild_remoting/script_error_payload.h"
 
 
 // todo: a x-platform abstraction? sdl?
@@ -86,6 +92,7 @@ typedef enum
     TB_EVENT_TRACE = 1u << 0,
     TB_EVENT_CART_RUN = 1u << 1,
     TB_EVENT_LUA_PROFILER_STOPPED = 1u << 2,
+    TB_EVENT_SCRIPT_ERROR = 1u << 3,
 } tb_event_flags;
 
 typedef struct
@@ -114,6 +121,8 @@ struct TicbuildRemoting
     bool profiler_active;
     uint32_t profiler_elapsed_seconds;
     int64_t next_event_id;
+    uint64_t next_script_error_id;
+    char* last_script_error;
 
     // Title/status tracking
     bool title_dirty;
@@ -238,84 +247,6 @@ bool ticbuild_remoting_take_title_dirty(TicbuildRemoting* ctx)
     return v;
 }
 
-// parses binary literal of form <hex...>
-// - whitespace ignored
-// - full bytes required (<f> is invalid, must be <0f>). disambigation because while <f> is obvious,
-//   <1234f> is not clear. is that 12 34 f0 or 12 34 0f?
-//   <14f> probably most natural to interpret this as 14 f0, but that is inconsistent with <f>.
-//   it could also be 01 4f.. better to just require 2-digit bytes.
-static bool tb_parse_bytes(const char* s, size_t n, uint8_t** out, size_t* outlen, TicbuildRemoting* ctx, char* err, size_t errcap)
-{
-    // s points at '<', ends with '>'
-    if(n < 2 || s[0] != '<' || s[n - 1] != '>')
-    {
-        tb_set_err(err, errcap, "invalid binary literal");
-        return false;
-    }
-
-    // collect hex digits only, ignore whitespace
-    char* hex = (char*)malloc(n);
-    if(!hex)
-    {
-        tb_set_err(err, errcap, "out of memory");
-        return false;
-    }
-
-    size_t hn = 0;
-    for(size_t i = 1; i + 1 < n; i++)
-    {
-        char c = s[i];
-        if(c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
-        if(!isxdigit((unsigned char)c)) { free(hex); tb_set_err(err, errcap, "binary contains non-hex"); return false; }
-        hex[hn++] = c;
-    }
-
-    if(hn % 2 != 0)
-    {
-        free(hex);
-        tb_set_err(err, errcap, "binary hex digit count must be even");
-        return false;
-    }
-
-    size_t bytes = hn / 2;
-    if(bytes > TB_PEEK_LIMIT)
-    {
-        free(hex);
-        tb_set_err(err, errcap, "binary too large");
-        return false;
-    }
-
-    if(ctx->tmpbytes_cap < bytes)
-    {
-        uint8_t* nb = (uint8_t*)realloc(ctx->tmpbytes, bytes);
-        if(!nb)
-        {
-            free(hex);
-            tb_set_err(err, errcap, "out of memory");
-            return false;
-        }
-        ctx->tmpbytes = nb;
-        ctx->tmpbytes_cap = bytes;
-    }
-
-    for(size_t i = 0; i < bytes; i++)
-    {
-        uint8_t hi, lo;
-        if(!tb_hex_nibble(hex[i * 2], &hi) || !tb_hex_nibble(hex[i * 2 + 1], &lo))
-        {
-            free(hex);
-            tb_set_err(err, errcap, "invalid hex");
-            return false;
-        }
-        ctx->tmpbytes[i] = (uint8_t)((hi << 4) | lo);
-    }
-
-    free(hex);
-    *out = ctx->tmpbytes;
-    *outlen = bytes;
-    return true;
-}
-
 static void tb_queue_output(tb_client* client, const char* s, size_t n)
 {
     if(n == 0) return;
@@ -340,6 +271,7 @@ static uint32_t tb_event_flag_from_name_len(const char* name, size_t len)
     if(len == 5 && memcmp(name, "trace", len) == 0) return TB_EVENT_TRACE;
     if(len == 8 && memcmp(name, "cart_run", len) == 0) return TB_EVENT_CART_RUN;
     if(len == 20 && memcmp(name, "lua_profiler_stopped", len) == 0) return TB_EVENT_LUA_PROFILER_STOPPED;
+    if(len == 12 && memcmp(name, "script_error", len) == 0) return TB_EVENT_SCRIPT_ERROR;
     return TB_EVENT_NONE;
 }
 
@@ -384,6 +316,7 @@ static const char* tb_event_name(uint32_t kind)
     case TB_EVENT_TRACE: return "trace";
     case TB_EVENT_CART_RUN: return "cart_run";
     case TB_EVENT_LUA_PROFILER_STOPPED: return "lua_profiler_stopped";
+    case TB_EVENT_SCRIPT_ERROR: return "script_error";
     default: return NULL;
     }
 }
@@ -461,7 +394,13 @@ static void tb_emit_event_kind(TicbuildRemoting* ctx, uint32_t kind, const char*
 
 void ticbuild_remoting_emit_event(TicbuildRemoting* ctx, const char* event_type, const char* data)
 {
-    tb_emit_event_kind(ctx, tb_event_flag_from_name(event_type), data);
+    uint32_t kind = tb_event_flag_from_name(event_type);
+    if(ctx && kind == TB_EVENT_CART_RUN)
+    {
+        free(ctx->last_script_error);
+        ctx->last_script_error = NULL;
+    }
+    tb_emit_event_kind(ctx, kind, data);
 }
 
 void ticbuild_remoting_emit_trace(TicbuildRemoting* ctx, const char* text)
@@ -475,6 +414,27 @@ void ticbuild_remoting_emit_trace(TicbuildRemoting* ctx, const char* text)
     if(tb_text_buffer_append_quoted(&out, trace_text, strlen(trace_text), err, sizeof err))
         ticbuild_remoting_emit_event(ctx, "trace", tb_text_buffer_data(&out));
     tb_text_buffer_dispose(&out);
+}
+
+void ticbuild_remoting_emit_script_error(TicbuildRemoting* ctx, const tic_script_error* error, const char* code_hash)
+{
+    if(!ctx || !error)
+        return;
+
+    char err[128] = {0};
+    const uint64_t error_id = ++ctx->next_script_error_id;
+    char* data = NULL;
+    if(tb_script_error_payload_build(error_id, error, code_hash, TB_TEXT_LINE_LIMIT, &data, err, sizeof err))
+    {
+        char* sticky = strdup(data);
+        if(sticky)
+        {
+            free(ctx->last_script_error);
+            ctx->last_script_error = sticky;
+        }
+        tb_emit_event_kind(ctx, TB_EVENT_SCRIPT_ERROR, data);
+    }
+    free(data);
 }
 
 static void tb_send_response_str(tb_client* client, int64_t id, bool ok, const char* data)
@@ -887,15 +847,22 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
         }
         else if(atok.len && atok.ptr[0] == '<')
         {
-            uint8_t* b;
             size_t blen;
-            if(!tb_parse_bytes(atok.ptr, atok.len, &b, &blen, ctx, err, sizeof err))
+            if(!tb_binary_literal_decode(
+                atok.ptr,
+                atok.len,
+                TB_PEEK_LIMIT,
+                &ctx->tmpbytes,
+                &ctx->tmpbytes_cap,
+                &blen,
+                err,
+                sizeof err))
             {
                 tb_free_args(args, argc);
                 tb_send_response_str(client, id, false, err);
                 return;
             }
-            args[argc++] = (tb_arg){TB_ARG_BYTES, {.b = {b, blen}}};
+            args[argc++] = (tb_arg){TB_ARG_BYTES, {.b = {ctx->tmpbytes, blen}}};
         }
         else
         {
@@ -997,6 +964,20 @@ static void tb_handle_line(TicbuildRemoting* ctx, tb_client* client, const char*
 
         tb_free_args(args, argc);
         tb_send_response_str(client, id, true, NULL);
+        return;
+    }
+
+    if(strcmp(cmd, "script_error_last") == 0)
+    {
+        if(argc != 0)
+        {
+            tb_free_args(args, argc);
+            tb_send_response_str(client, id, false, "usage: <id> script_error_last");
+            return;
+        }
+
+        tb_free_args(args, argc);
+        tb_send_response_str(client, id, true, ctx->last_script_error);
         return;
     }
 
@@ -1571,6 +1552,7 @@ TicbuildRemoting* ticbuild_remoting_create(int port, const char* session_dir, bo
     ctx->client_count = 0;
     ctx->last_client_count = 0;
     ctx->next_event_id = -1;
+    ctx->next_script_error_id = 0;
     for(int i = 0; i < TB_MAX_CLIENTS; i++)
     {
         ctx->clients[i].sock = TB_INVALID_SOCKET;
@@ -1611,6 +1593,7 @@ void ticbuild_remoting_close(TicbuildRemoting* ctx)
         WSACleanup();
 
     free(ctx->tmpbytes);
+    free(ctx->last_script_error);
     free(ctx->discovery_dir);
     free(ctx);
 }

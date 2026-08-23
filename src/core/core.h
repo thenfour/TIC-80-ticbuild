@@ -184,6 +184,12 @@ typedef struct
 
     s32 samplerate;
     tic_tick_data* data;
+    tic_script_error scriptError; // store in state for `script_error_last` support
+    struct
+    {
+        const char* phase;
+        bool errorInitialized;
+    } luaCall;
     tic_core_state_data state;
 
     struct

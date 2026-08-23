@@ -32,8 +32,47 @@ typedef void(*RemapFunc)(void*, s32 x, s32 y, RemapResult* result);
 
 typedef struct tic_mem tic_mem;
 
+enum
+{
+    TIC_SCRIPT_ERROR_MAX_FRAMES = 64,
+    TIC_SCRIPT_ERROR_SOURCE_SIZE = 256,
+    TIC_SCRIPT_ERROR_NAME_SIZE = 128,
+    TIC_SCRIPT_ERROR_MESSAGE_SIZE = 2048,
+    TIC_SCRIPT_ERROR_TRACEBACK_SIZE = 8192,
+};
+
+// https://www.lua.org/manual/5.3/manual.html#4.9
+typedef struct tic_script_error_frame
+{
+    char source[TIC_SCRIPT_ERROR_SOURCE_SIZE];
+    char name[TIC_SCRIPT_ERROR_NAME_SIZE];
+    char nameWhat[32];
+    char what[16];
+    s32 currentLine;
+    s32 lineDefined;
+    s32 lastLineDefined;
+    s32 parameterCount;
+    s32 upvalueCount;
+    bool variadic;
+    bool tailCall;
+} tic_script_error_frame;
+
+typedef struct tic_script_error
+{
+    u32 schemaVersion;
+    char language[16];
+    char kind[16];
+    char phase[32];
+    char message[TIC_SCRIPT_ERROR_MESSAGE_SIZE];
+    char traceback[TIC_SCRIPT_ERROR_TRACEBACK_SIZE];
+    tic_script_error_frame frames[TIC_SCRIPT_ERROR_MAX_FRAMES];
+    s32 frameCount;
+    bool framesTruncated;
+} tic_script_error;
+
 typedef void(*TraceOutput)(void*, const char*, u8 color);
 typedef void(*ErrorOutput)(void*, const char*);
+typedef void(*ScriptErrorOutput)(void*, const tic_script_error*);
 typedef void(*ExitCallback)(void*);
 typedef u64(*CounterCallback)(void*);
 typedef u64(*FreqCallback)(void*);
@@ -49,6 +88,7 @@ typedef struct
 {
     TraceOutput trace;
     ErrorOutput error;
+    ScriptErrorOutput scriptError;
     ExitCallback exit;
 
     CounterCallback counter;

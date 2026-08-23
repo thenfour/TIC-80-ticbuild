@@ -11,6 +11,7 @@ extern "C"
 
     typedef struct TicbuildRemoting TicbuildRemoting;
     typedef struct tb_text_buffer tb_text_buffer;
+    struct tic_script_error;
 
     typedef struct
     {
@@ -48,6 +49,7 @@ extern "C"
     // `data` is optional protocol-formatted event payload text.
     void ticbuild_remoting_emit_event(TicbuildRemoting* ctx, const char* event_type, const char* data);
     void ticbuild_remoting_emit_trace(TicbuildRemoting* ctx, const char* text);
+    void ticbuild_remoting_emit_script_error(TicbuildRemoting* ctx, const struct tic_script_error* error, const char* code_hash);
 
     // Per-frame timing hook (call once per rendered frame).
     // `counter`/`freq` should come from tic_sys_counter_get()/tic_sys_freq_get().
