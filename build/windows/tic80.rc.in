@@ -2,7 +2,7 @@
 
 1 VERSIONINFO
 	FILEVERSION @VERSION_MAJOR@,@VERSION_MINOR@,@VERSION_REVISION@,0
-	PRODUCTVERSION @VERSION_MAJOR@,@VERSION_MINOR@,@VERSION_REVISION@,0
+	PRODUCTVERSION @TICBUILD_VERSION_MAJOR@,@TICBUILD_VERSION_MINOR@,@TICBUILD_VERSION_PATCH@,0
 	FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
 	FILEFLAGS 0x1L
@@ -18,13 +18,14 @@ BEGIN
 		BLOCK "040904E4"
 		BEGIN
 			VALUE "CompanyName", "Nesbox"
-			VALUE "FileDescription", "TIC-80 tiny computer"
-			VALUE "FileVersion", "@VERSION_MAJOR@.@VERSION_MINOR@.@VERSION_REVISION@.0"
+			VALUE "FileDescription", "TIC-80 tiny computer (ticbuild fork)"
+			VALUE "FileVersion", "@TIC_VERSION_RESOURCE@"
 			VALUE "InternalName", "tic80.exe"
 			VALUE "LegalCopyright", "https://tic80.com (C) 2017-@VERSION_YEAR@"
 			VALUE "OriginalFilename", "tic80.exe"
-			VALUE "ProductName", "TIC-80"
-			VALUE "ProductVersion", "@VERSION_MAJOR@.@VERSION_MINOR@.@VERSION_REVISION@.0"
+			VALUE "ProductName", "TIC-80 ticbuild fork"
+			VALUE "ProductVersion", "@TICBUILD_VERSION@"
+			VALUE "Comments", "ticbuild fork maintained by thenfour"
 		END
 	END
 	BLOCK "VarFileInfo"

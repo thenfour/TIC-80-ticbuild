@@ -172,6 +172,12 @@ if(BUILD_SDL)
 
     if(WIN32)
 
+        set(TIC_VERSION_RESOURCE_POST "")
+        if(BUILD_PRO)
+            set(TIC_VERSION_RESOURCE_POST " Pro")
+        endif()
+        set(TIC_VERSION_RESOURCE "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REVISION}${VERSION_STATUS}${VERSION_BUILD}${TIC_VERSION_RESOURCE_POST} ticbuild ${TICBUILD_VERSION} (${VERSION_HASH})")
+
         configure_file("${PROJECT_SOURCE_DIR}/build/windows/tic80.rc.in" "${PROJECT_SOURCE_DIR}/build/windows/tic80.rc")
         set(TIC80_SRC ${TIC80_SRC} "${PROJECT_SOURCE_DIR}/build/windows/tic80.rc")
 
