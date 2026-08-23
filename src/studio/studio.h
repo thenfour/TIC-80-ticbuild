@@ -243,8 +243,6 @@ void studioRemotingCartRun(Studio* studio);
 void studioRemotingLuaProfilerStopped(Studio* studio);
 #if defined(TIC_BUILD_WITH_REMOTING)
 bool studioHmrPostBoot(Studio* studio);
-void studioHmrDiscardPending(Studio* studio);
-void studioHmrDiscardAll(Studio* studio);
 #endif
 
 void setStudioMode(Studio* studio, EditorMode mode);

@@ -265,7 +265,6 @@ struct Studio
         tb_text_buffer snapshot;
         bool snapshot_available;
         bool delivery_pending;
-        bool saver_available;
     } hmr;
 #endif
 
@@ -359,6 +358,9 @@ static bool hmr_is_lua_runtime(Studio* studio)
 
 static void hmr_capture_snapshot(Studio* studio)
 {
+    if(!studio || !hmr_is_lua_runtime(studio))
+        return;
+
     tb_text_buffer candidate;
     // tb_text_buffer's limit includes its terminating NUL; the HMR contract's
     // one-megabyte limit applies to serialized payload bytes only.
@@ -366,14 +368,15 @@ static void hmr_capture_snapshot(Studio* studio)
 
     bool captured = false;
 #if defined(TIC_BUILD_WITH_LUA_API)
-    if(studio->hmr.saver_available && hmr_is_lua_runtime(studio))
-        captured = tb_lua_capture_hmr_state(studio->tic, &candidate);
+    captured = tb_lua_capture_hmr_state(studio->tic, &candidate);
 #endif
-
-    hmr_clear_snapshot(studio);
 
     if(captured)
     {
+        // Only a complete capture from the current live VM may replace a
+        // retained snapshot. Failed or incomplete cart generations have no
+        // installed saver and leave the last known-good snapshot untouched.
+        hmr_clear_snapshot(studio);
         studio->hmr.snapshot = candidate;
         studio->hmr.snapshot_available = true;
     }
@@ -389,7 +392,6 @@ bool studioHmrPostBoot(Studio* studio)
     {
         hmr_clear_snapshot(studio);
         studio->hmr.delivery_pending = false;
-        studio->hmr.saver_available = false;
         return true;
     }
 
@@ -401,29 +403,17 @@ bool studioHmrPostBoot(Studio* studio)
         has_saved ? studio->hmr.snapshot.len : 0,
         has_saved);
 
+    if(result == LUAAPI_HMR_ERROR)
+        return false;
+
+    // A successful HMR call acknowledges the pending snapshot. Returning nil
+    // deliberately installs no saver; a missing HMR likewise opts out.
     hmr_clear_snapshot(studio);
     studio->hmr.delivery_pending = false;
-    studio->hmr.saver_available = result == LUAAPI_HMR_SAVER_INSTALLED;
-    return result != LUAAPI_HMR_ERROR;
+    return true;
 #else
     return true;
 #endif
-}
-
-void studioHmrDiscardPending(Studio* studio)
-{
-    if(!studio)
-        return;
-
-    hmr_clear_snapshot(studio);
-    studio->hmr.delivery_pending = false;
-}
-
-void studioHmrDiscardAll(Studio* studio)
-{
-    studioHmrDiscardPending(studio);
-    if(studio)
-        studio->hmr.saver_available = false;
 }
 
 static bool remoting_has_current_cart(const Studio* studio)

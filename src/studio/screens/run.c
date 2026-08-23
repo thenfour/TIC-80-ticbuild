@@ -26,10 +26,6 @@
 #include "ext/md5.h"
 #include <time.h>
 
-#if defined(TIC_BUILD_WITH_REMOTING)
-#include "core/core.h"
-#endif
-
 #if defined(BUILD_EDITORS)
 #include "ticbuild_remoting/user_timing.h"
 #endif
@@ -49,12 +45,6 @@ static void onError(void* data, const char* info)
 
 #if defined(BUILD_EDITORS)
     run->error = true;
-#if defined(TIC_BUILD_WITH_REMOTING)
-    if(((tic_core*)run->tic)->state.initialized)
-        studioHmrDiscardPending(run->studio);
-    else
-        studioHmrDiscardAll(run->studio);
-#endif
     setStudioMode(run->studio, TIC_CONSOLE_MODE);
     run->console->error(run->console, info);
 #else
@@ -70,10 +60,7 @@ static bool onPostBoot(void* data, tic_mem* tic)
     Run* run = (Run*)data;
 
     if(run->error)
-    {
-        studioHmrDiscardAll(run->studio);
         return false;
-    }
 
     return studioHmrPostBoot(run->studio);
 }

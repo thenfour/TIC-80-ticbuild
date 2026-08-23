@@ -259,7 +259,9 @@ end
 saver installed on previous run, et al).
 Returning `nil` installs no saver callback.
 
-The state snapshot is consumed by the next successful load-and-run.
+Error-handling: The state snapshot survives across cart-load, VM-initialization, `BOOT()`,
+and `HMR()` failures. Failed captures leaves the older one
+untouched. The snapshot is consumed only after `HMR(saved)` returns successfully.
 Missing `HMR` discards it.
 
 Supported values are `nil`, booleans, finite, tables. Must contain no cycles,
