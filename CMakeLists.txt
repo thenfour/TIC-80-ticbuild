@@ -4,16 +4,6 @@ include(cmake/version.cmake)
 
 project(TIC-80 VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REVISION} LANGUAGES C CXX)
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2 -flto -ffat-lto-objects")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 -flto -ffat-lto-objects")
-endif()
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"  OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2 -flto")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 -flto")
-endif()
-
 if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version")
 endif()
@@ -53,8 +43,25 @@ option(BUILD_TOUCH_INPUT "Build with touch input support" ${BUILD_TOUCH_INPUT_DE
 option(BUILD_NO_OPTIMIZATION "Build without optimizations for debugging" OFF)
 option(BUILD_ASAN_DEBUG "Build with AddressSanitizer" OFF)
 option(BUILD_WITH_ZLIB "Build with zlib linked" ON)
+option(BUILD_LUA_PERF "Build Lua instruction counting and profiling" ON)
+option(BUILD_OPTIMIZE_FOR_SPEED "Use O3 instead of O2 for Release builds" OFF)
 option(TIC80_TARGET "Target binary suffix")
 option(PREFER_SYSTEM_LIBRARIES "Prefer link with system libraries" OFF)
+
+set(TIC_RELEASE_OPTIMIZATION -O2)
+if(BUILD_OPTIMIZE_FOR_SPEED)
+    set(TIC_RELEASE_OPTIMIZATION -O3)
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${TIC_RELEASE_OPTIMIZATION} -flto -ffat-lto-objects")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${TIC_RELEASE_OPTIMIZATION} -flto -ffat-lto-objects")
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"  OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${TIC_RELEASE_OPTIMIZATION} -flto")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${TIC_RELEASE_OPTIMIZATION} -flto")
+endif()
 
 
 if(NOT TIC80_TARGET)
@@ -85,6 +92,8 @@ message("BUILD_STATIC: ${BUILD_STATIC}")
 message("BUILD_SDLGPU: ${BUILD_SDLGPU}")
 message("BUILD_TOUCH_INPUT: ${BUILD_TOUCH_INPUT}")
 message("BUILD_WITH_ALL: ${BUILD_WITH_ALL}")
+message("BUILD_LUA_PERF: ${BUILD_LUA_PERF}")
+message("BUILD_OPTIMIZE_FOR_SPEED: ${BUILD_OPTIMIZE_FOR_SPEED}")
 
 if(NINTENDO_3DS OR BAREMETALPI)
     set(BUILD_SDL OFF)

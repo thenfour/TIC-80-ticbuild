@@ -171,6 +171,7 @@ static tb_lua_profiler_frame_mode tb_parse_profiler_frame_mode(const char* frame
     return TB_LUA_PROFILER_FRAME_FUNCTION;
 }
 
+#if defined(BUILD_LUA_PERF)
 static int tb_internal_hook_step(const tb_lua_perf_slot* slot)
 {
     int step = TB_LUA_HOOK_STEP;
@@ -206,6 +207,7 @@ static void tb_refresh_hook(tb_lua_perf_slot* slot)
     lua_sethook(slot->lua, tb_lua_hook, slot->prev_mask | LUA_MASKCOUNT, hook_step);
     slot->hook_installed = true;
 }
+#endif
 
 static void tb_sanitize_label(char* s)
 {
@@ -638,6 +640,7 @@ static void tb_lua_hook(lua_State* L, lua_Debug* ar)
 
 void ticbuild_lua_perf_install(tic_mem* tic)
 {
+#if defined(BUILD_LUA_PERF)
     if(!tic) return;
 
     tic_core* core = (tic_core*)tic;
@@ -658,6 +661,9 @@ void ticbuild_lua_perf_install(tic_mem* tic)
         slot->profiler.next_due_tick = 0;
 
     tb_refresh_hook(slot);
+#else
+    (void)tic;
+#endif
 }
 
 void ticbuild_lua_perf_reset_counter(tic_mem* tic)
@@ -762,6 +768,21 @@ bool ticbuild_lua_profiler_start(
     char* err,
     size_t errcap)
 {
+#if !defined(BUILD_LUA_PERF)
+    (void)tic;
+    (void)mode;
+    (void)instruction_interval;
+    (void)wall_clock_period_micros;
+    (void)frame_mode;
+    (void)duration_seconds;
+    (void)output_path;
+
+    if(saved_path && saved_path_cap > 0)
+        saved_path[0] = '\0';
+
+    tb_set_err(err, errcap, "lua profiler disabled at build time");
+    return false;
+#else
     tb_lua_profiler_mode parsed_mode = tb_parse_profiler_mode(mode);
     if(parsed_mode == TB_LUA_PROFILER_MODE_OFF)
     {
@@ -871,6 +892,7 @@ bool ticbuild_lua_profiler_start(
 
     tb_refresh_hook(slot);
     return true;
+#endif
 }
 
 bool ticbuild_lua_profiler_stop(
@@ -891,8 +913,10 @@ bool ticbuild_lua_profiler_stop(
     bool ok = tb_profiler_write_output(slot, output_path, saved_path, saved_path_cap, err, errcap);
 
     tb_profiler_reset(&slot->profiler);
+#if defined(BUILD_LUA_PERF)
     if(slot->lua)
         tb_refresh_hook(slot);
+#endif
 
     return ok;
 }

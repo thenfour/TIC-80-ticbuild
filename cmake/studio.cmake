@@ -91,6 +91,9 @@ endif()
 
 if(BUILD_EDITORS)
     target_compile_definitions(tic80studio PUBLIC BUILD_EDITORS)
+    if(BUILD_LUA_PERF)
+        target_compile_definitions(tic80studio PRIVATE BUILD_LUA_PERF)
+    endif()
 endif()
 
 if(TIC_BUILD_WITH_REMOTING)
