@@ -39,9 +39,23 @@ enum
     TIC_SCRIPT_ERROR_NAME_SIZE = 128,
     TIC_SCRIPT_ERROR_MESSAGE_SIZE = 2048,
     TIC_SCRIPT_ERROR_TRACEBACK_SIZE = 8192,
+    TIC_SCRIPT_ERROR_MAX_VARIABLES = 64,
+    TIC_SCRIPT_ERROR_VARIABLE_SCOPE_SIZE = 16,
+    TIC_SCRIPT_ERROR_VARIABLE_TYPE_SIZE = 16,
+    TIC_SCRIPT_ERROR_VARIABLE_DISPLAY_SIZE = 256,
 };
 
 // https://www.lua.org/manual/5.3/manual.html#4.9
+typedef struct tic_script_error_variable
+{
+    char name[TIC_SCRIPT_ERROR_NAME_SIZE];
+    char scope[TIC_SCRIPT_ERROR_VARIABLE_SCOPE_SIZE];
+    char type[TIC_SCRIPT_ERROR_VARIABLE_TYPE_SIZE];
+    char display[TIC_SCRIPT_ERROR_VARIABLE_DISPLAY_SIZE];
+    s32 index;
+    bool valueTruncated;
+} tic_script_error_variable;
+
 typedef struct tic_script_error_frame
 {
     char source[TIC_SCRIPT_ERROR_SOURCE_SIZE];
@@ -55,6 +69,10 @@ typedef struct tic_script_error_frame
     s32 upvalueCount;
     bool variadic;
     bool tailCall;
+    s32 variableStart;
+    s32 variableCount;
+    bool variablesCaptured;
+    bool variablesTruncated;
 } tic_script_error_frame;
 
 typedef struct tic_script_error
@@ -66,7 +84,9 @@ typedef struct tic_script_error
     char message[TIC_SCRIPT_ERROR_MESSAGE_SIZE];
     char traceback[TIC_SCRIPT_ERROR_TRACEBACK_SIZE];
     tic_script_error_frame frames[TIC_SCRIPT_ERROR_MAX_FRAMES];
+    tic_script_error_variable variables[TIC_SCRIPT_ERROR_MAX_VARIABLES];
     s32 frameCount;
+    s32 variableCount;
     bool framesTruncated;
 } tic_script_error;
 

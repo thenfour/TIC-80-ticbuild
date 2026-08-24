@@ -605,3 +605,36 @@ decompressing.
 - Note: The zipped payload must be zero-terminated due to internal handling.
 
 # script_error payload
+
+`script_error` events and `script_error_last` responses carry a hex-encoded binary literal
+containing UTF-8 JSON. Schema v1 is extensible: consumers must ignore
+unknown fields.
+
+Runtime Lua frames can contain a bounded snapshot of active variables:
+
+```json
+{
+  "variablesCaptured": true,
+  "variablesTruncated": false,
+  "variables": [
+    {
+      "runtimeName": "speed",
+      "scope": "local",
+      "type": "nil",
+      "display": "nil",
+      "index": 3,
+      "valueTruncated": false
+    }
+  ]
+}
+```
+
+- `variablesCaptured` and `variablesTruncated` describes if `variables` contains
+  all or some/none of the actual variables in the frame. makes "this frame had no variables"
+  distinguishable from "this frame has variables but only some/none appear in this payload".
+- `scope` is `parameter`, `local`, or `upvalue`. Upvalues are captured only for
+  the immediate Lua frame, and `_ENV` is omitted.
+- `display` uses the same non-metamethod Lua-expression serialization as
+  `eval_expr`. Scalar-like tables are traversed with raw Lua operations;
+  unsupported or cyclic values fall back to `<type>`.
+- `valueTruncated` tells if a the value had to be truncated for display purposes.

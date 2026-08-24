@@ -11,6 +11,7 @@ if(BUILD_WITH_LUA AND PREFER_SYSTEM_LIBRARIES)
     if(lua_INCLUDE_DIR AND lua_LIBRARY)
         add_library(luaapi STATIC
             ${CMAKE_SOURCE_DIR}/src/api/luaapi.c
+            ${CMAKE_SOURCE_DIR}/src/api/lua_value_serialize.c
             ${CMAKE_SOURCE_DIR}/src/api/parse_note.c
         )
         target_link_libraries(luaapi PRIVATE runtime ${lua_LIBRARY})
@@ -73,6 +74,7 @@ if(BUILD_WITH_LUA OR BUILD_WITH_MOON OR BUILD_WITH_YUE OR BUILD_WITH_FENNEL)
     add_library(luaapi STATIC
         ${LUA_SRC}
         ${CMAKE_SOURCE_DIR}/src/api/luaapi.c
+        ${CMAKE_SOURCE_DIR}/src/api/lua_value_serialize.c
         ${CMAKE_SOURCE_DIR}/src/api/parse_note.c
     )
     target_link_libraries(luaapi PRIVATE runtime)

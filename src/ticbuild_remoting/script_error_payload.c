@@ -17,9 +17,27 @@ static bool append_int_field(tb_text_buffer* json, const char* name, int64_t val
         && tb_json_append_int(json, value, err, errcap);
 }
 
-static bool append_frame(tb_text_buffer* json, const tic_script_error_frame* frame, char* err, size_t errcap)
+static bool append_variable(tb_text_buffer* json, const tic_script_error_variable* variable, char* err, size_t errcap)
 {
     return tb_text_buffer_append_char(json, '{', err, errcap)
+        && append_text_field(json, "\"runtimeName\":", variable->name, err, errcap)
+        && append_text_field(json, ",\"scope\":", variable->scope, err, errcap)
+        && append_text_field(json, ",\"type\":", variable->type, err, errcap)
+        && append_text_field(json, ",\"display\":", variable->display, err, errcap)
+        && append_int_field(json, ",\"index\":", variable->index, err, errcap)
+        && tb_text_buffer_append_cstr(json, ",\"valueTruncated\":", err, errcap)
+        && tb_json_append_bool(json, variable->valueTruncated, err, errcap)
+        && tb_text_buffer_append_char(json, '}', err, errcap);
+}
+
+static bool append_frame(
+    tb_text_buffer* json,
+    const tic_script_error* error,
+    const tic_script_error_frame* frame,
+    char* err,
+    size_t errcap)
+{
+    bool ok = tb_text_buffer_append_char(json, '{', err, errcap)
         && append_text_field(json, "\"source\":", frame->source, err, errcap)
         && append_text_field(json, ",\"name\":", frame->name, err, errcap)
         && append_text_field(json, ",\"nameWhat\":", frame->nameWhat, err, errcap)
@@ -33,7 +51,30 @@ static bool append_frame(tb_text_buffer* json, const tic_script_error_frame* fra
         && tb_json_append_bool(json, frame->variadic, err, errcap)
         && tb_text_buffer_append_cstr(json, ",\"tailCall\":", err, errcap)
         && tb_json_append_bool(json, frame->tailCall, err, errcap)
-        && tb_text_buffer_append_char(json, '}', err, errcap);
+        && tb_text_buffer_append_cstr(json, ",\"variablesCaptured\":", err, errcap)
+        && tb_json_append_bool(json, frame->variablesCaptured, err, errcap)
+        && tb_text_buffer_append_cstr(json, ",\"variablesTruncated\":", err, errcap)
+        && tb_json_append_bool(json, frame->variablesTruncated, err, errcap)
+        && tb_text_buffer_append_cstr(json, ",\"variables\":[", err, errcap);
+
+    if(frame->variableStart < 0 || frame->variableCount < 0
+        || frame->variableStart > error->variableCount
+        || frame->variableCount > error->variableCount - frame->variableStart)
+    {
+        tb_set_err(err, errcap, "invalid script error variables");
+        return false;
+    }
+    const s32 variableEnd = frame->variableStart + frame->variableCount;
+
+    for(s32 i = frame->variableStart; ok && i < variableEnd; i++)
+    {
+        if(i > frame->variableStart)
+            ok = tb_text_buffer_append_char(json, ',', err, errcap);
+        if(ok)
+            ok = append_variable(json, &error->variables[i], err, errcap);
+    }
+
+    return ok && tb_text_buffer_append_cstr(json, "]}", err, errcap);
 }
 
 bool tb_script_error_payload_build(
@@ -45,7 +86,8 @@ bool tb_script_error_payload_build(
     char* err,
     size_t errcap)
 {
-    if(!out || !error || output_limit < 3)
+    if(!out || !error || output_limit < 3
+        || error->variableCount < 0 || error->variableCount > TIC_SCRIPT_ERROR_MAX_VARIABLES)
     {
         tb_set_err(err, errcap, "invalid script error payload");
         return false;
@@ -72,7 +114,7 @@ bool tb_script_error_payload_build(
         if(i)
             ok = tb_text_buffer_append_char(&json, ',', err, errcap);
         if(ok)
-            ok = append_frame(&json, &error->frames[i], err, errcap);
+            ok = append_frame(&json, error, &error->frames[i], err, errcap);
     }
 
     if(ok)

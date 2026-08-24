@@ -22,6 +22,7 @@
 
 #include "core/core.h"
 #include "luaapi.h"
+#include "api/lua_value_serialize.h"
 
 #include <stdlib.h>
 #include <lua.h>
@@ -1888,10 +1889,161 @@ static void beginScriptError(tic_core* core, const char* kind, const char* phase
     copyErrorText(error->phase, sizeof error->phase, phase);
 }
 
+enum
+{
+    ScriptErrorVariableFrameLimit = 3,
+    ScriptErrorVariablesPerFrame = 24,
+};
+
+typedef struct
+{
+    char* text;
+    size_t capacity;
+    size_t length;
+    bool truncated;
+} script_error_preview;
+
+static bool appendScriptErrorPreview(void* data, const char* text, size_t length)
+{
+    script_error_preview* preview = (script_error_preview*)data;
+    if(!preview || !preview->text || preview->capacity == 0)
+        return false;
+
+    const size_t available = preview->capacity - preview->length - 1;
+    if(length > available)
+    {
+        if(available)
+        {
+            memcpy(preview->text + preview->length, text, available);
+            preview->length += available;
+            preview->text[preview->length] = '\0';
+        }
+        preview->truncated = true;
+        return false;
+    }
+
+    memcpy(preview->text + preview->length, text, length);
+    preview->length += length;
+    preview->text[preview->length] = '\0';
+    return true;
+}
+
+static void finishScriptErrorPreview(script_error_preview* preview)
+{
+    if(!preview || !preview->truncated || preview->capacity <= 1)
+        return;
+
+    static const char Ellipsis[] = "...";
+    const size_t ellipsisLength = sizeof Ellipsis - 1;
+    const size_t writable = preview->capacity - 1;
+    const size_t suffixLength = writable < ellipsisLength ? writable : ellipsisLength;
+    if(preview->length > writable - suffixLength)
+        preview->length = writable - suffixLength;
+    memcpy(preview->text + preview->length, Ellipsis, suffixLength);
+    preview->length += suffixLength;
+    preview->text[preview->length] = '\0';
+}
+
+static bool isNamedScriptErrorVariable(const char* name)
+{
+    return name && name[0] && name[0] != '(' && strcmp(name, "?") != 0;
+}
+
+static bool captureScriptErrorVariable(
+    lua_State* lua,
+    tic_script_error* error,
+    tic_script_error_frame* frame,
+    const char* name,
+    const char* scope,
+    s32 index)
+{
+    if(frame->variableCount >= ScriptErrorVariablesPerFrame
+        || error->variableCount >= TIC_SCRIPT_ERROR_MAX_VARIABLES)
+    {
+        frame->variablesTruncated = true;
+        return false;
+    }
+
+    tic_script_error_variable* variable = &error->variables[error->variableCount++];
+    frame->variableCount++;
+    copyErrorText(variable->name, sizeof variable->name, name);
+    copyErrorText(variable->scope, sizeof variable->scope, scope);
+    copyErrorText(variable->type, sizeof variable->type, luaL_typename(lua, -1));
+    variable->index = index;
+
+    script_error_preview preview =
+    {
+        .text = variable->display,
+        .capacity = sizeof variable->display,
+    };
+    char serializationError[128] = {0};
+    const bool serialized = luaapi_serialize_value(
+        lua,
+        -1,
+        appendScriptErrorPreview,
+        &preview,
+        serializationError,
+        sizeof serializationError);
+
+    if(preview.truncated)
+    {
+        finishScriptErrorPreview(&preview);
+        variable->valueTruncated = true;
+    }
+    else if(!serialized)
+    {
+        snprintf(variable->display, sizeof variable->display, "<%s>", variable->type);
+    }
+
+    return true;
+}
+
+static void captureLuaFrameVariables(
+    lua_State* lua,
+    lua_Debug* luaFrame,
+    tic_script_error* error,
+    tic_script_error_frame* out,
+    bool captureUpvalues)
+{
+    out->variablesCaptured = true;
+    out->variableStart = error->variableCount;
+
+    for(s32 index = 1; ; index++)
+    {
+        const char* name = lua_getlocal(lua, luaFrame, index);
+        if(!name)
+            break;
+
+        if(isNamedScriptErrorVariable(name))
+        {
+            const char* scope = index <= luaFrame->nparams ? "parameter" : "local";
+            captureScriptErrorVariable(lua, error, out, name, scope, index);
+        }
+        lua_pop(lua, 1);
+    }
+
+    if(!captureUpvalues || !lua_getinfo(lua, "f", luaFrame))
+        return;
+
+    const int functionIndex = lua_gettop(lua);
+    for(s32 index = 1; index <= luaFrame->nups; index++)
+    {
+        const char* name = lua_getupvalue(lua, functionIndex, index);
+        if(!name)
+            break;
+
+        if(isNamedScriptErrorVariable(name) && strcmp(name, "_ENV") != 0)
+            captureScriptErrorVariable(lua, error, out, name, "upvalue", index);
+        lua_pop(lua, 1);
+    }
+    lua_pop(lua, 1);
+}
+
 static void captureLuaFrames(lua_State* lua, tic_script_error* error)
 {
     lua_Debug frame;
     s32 level = 1; // skip this message handler
+    s32 variableFrameCount = 0;
 
     while(error->frameCount < TIC_SCRIPT_ERROR_MAX_FRAMES && lua_getstack(lua, level, &frame))
     {
@@ -1916,6 +2068,12 @@ static void captureLuaFrames(lua_State* lua, tic_script_error* error)
         out->upvalueCount = frame.nups;
         out->variadic = frame.isvararg != 0;
         out->tailCall = frame.istailcall != 0;
+
+        if(strcmp(out->what, "C") != 0 && variableFrameCount < ScriptErrorVariableFrameLimit)
+        {
+            captureLuaFrameVariables(lua, &frame, error, out, variableFrameCount == 0);
+            variableFrameCount++;
+        }
         level++;
     }
 

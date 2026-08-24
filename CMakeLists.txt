@@ -200,3 +200,20 @@ include(cmake/n3ds.cmake)
 include(cmake/nswitch.cmake)
 
 include(cmake/install.cmake)
+
+option(TICBUILD_BUILD_TESTS "Build ticbuild fork diagnostic tests" OFF)
+if(TICBUILD_BUILD_TESTS)
+    if(NOT BUILD_STATIC)
+        message(FATAL_ERROR "TICBUILD_BUILD_TESTS requires BUILD_STATIC=ON")
+    endif()
+
+    enable_testing()
+    add_executable(ticbuild-script-error-test
+        ${CMAKE_SOURCE_DIR}/tests/script_error_locals_test.c
+        ${CMAKE_SOURCE_DIR}/src/ticbuild_remoting/binary_literal.c
+        ${CMAKE_SOURCE_DIR}/src/ticbuild_remoting/json_writer.c
+        ${CMAKE_SOURCE_DIR}/src/ticbuild_remoting/script_error_payload.c
+        ${CMAKE_SOURCE_DIR}/src/ticbuild_remoting/utils.c)
+    target_link_libraries(ticbuild-script-error-test PRIVATE tic80core)
+    add_test(NAME ticbuild-script-error-test COMMAND ticbuild-script-error-test)
+endif()
